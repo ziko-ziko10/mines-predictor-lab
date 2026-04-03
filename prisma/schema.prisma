@@ -1,0 +1,44 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Round {
+  id              String   @id @default(cuid())
+  userId          String   @default("legacy-anonymous")
+  mineCount       Int
+  predictionCount Int
+  predictedCells  String
+  playedCells     String?
+  result          RoundResult
+  hitCell         Int?
+  mineLocations   String?
+  createdAt       DateTime @default(now())
+
+  @@index([userId, mineCount, createdAt])
+}
+
+model CellStat {
+  id             Int      @id @default(autoincrement())
+  userId         String   @default("legacy-anonymous")
+  mineCount      Int
+  cellIndex      Int
+  timesPredicted Int      @default(0)
+  timesPlayed    Int      @default(0)
+  mineReports    Int      @default(0)
+  winCount       Int      @default(0)
+  lossCount      Int      @default(0)
+  updatedAt      DateTime @updatedAt
+
+  @@unique([userId, mineCount, cellIndex])
+}
+
+enum RoundResult {
+  WON
+  LOST
+}
