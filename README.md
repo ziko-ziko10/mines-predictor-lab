@@ -2,7 +2,7 @@
 
 Mines Predictor Lab is a 5x5 prediction tracker for an external mines-style game. The app does not claim to recover a hidden algorithm. Instead, it learns from the round history you log for each mine count and uses that history to rank cells by relative risk.
 
-The app now requires an account. Users sign in with an email and password, and all rounds, logs, and analytics are scoped to the authenticated user.
+The app now requires an account. Users sign in with an email and password, and all rounds, logs, analytics, and evaluation results are scoped to the authenticated user.
 
 ## Features
 
@@ -11,8 +11,12 @@ The app now requires an account. Users sign in with an email and password, and a
 - Prediction workflow for a 5x5 board
 - Win logging that records which predicted cells were actually played
 - Loss logging that records the hit cell and all mine locations
+- Optional full-board truth logging on wins when the external game reveals the full board
 - Separate datasets, logs, and analytics for each mine count and user
 - Supabase Postgres + Prisma persistence for audience-ready deployment
+- Confidence gating with `CONFIDENT`, `EXPLORATORY`, and `ABSTAIN` modes
+- Holdout evaluation against a frequency baseline and random baseline
+- Optional verifier-ready fields for `serverSeed`, `clientSeed`, and `nonce`
 
 ## Tech stack
 
@@ -72,9 +76,20 @@ NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY="your-supabase-publishable-key"
 ## Logging rules
 
 - `Won`: select the predicted cells that were actually played.
+- `Won` with full truth available: optionally log the full mine layout too.
 - `Lost`: select exactly the configured number of mine cells and also mark the hit cell.
 - Each mine count is tracked separately.
 - Each user sees only their own rounds and analytics.
+
+## Model realism upgrades
+
+- The live predictor can now return `CONFIDENT`, `EXPLORATORY`, or `ABSTAIN` instead of always pretending certainty.
+- Full-board truth coverage is tracked per mine count so you can see how much of the dataset is actually testable.
+- The evaluation page runs a chronological holdout backtest on truth-known rounds.
+- The current model is compared against:
+  - a frequency-only baseline
+  - a random baseline
+- Confidence intervals are shown for mine-rate estimates and holdout safe-rate metrics.
 
 ## Deployment notes
 

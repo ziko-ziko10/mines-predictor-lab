@@ -13,11 +13,15 @@ model Round {
   userId          String   @default("legacy-anonymous")
   mineCount       Int
   predictionCount Int
+  predictionMode  PredictionMode @default(CONFIDENT)
   predictedCells  String
   playedCells     String?
   result          RoundResult
   hitCell         Int?
   mineLocations   String?
+  serverSeed      String?
+  clientSeed      String?
+  nonce           String?
   createdAt       DateTime @default(now())
 
   @@index([userId, mineCount, createdAt])
@@ -41,4 +45,10 @@ model CellStat {
 enum RoundResult {
   WON
   LOST
+}
+
+enum PredictionMode {
+  CONFIDENT
+  EXPLORATORY
+  ABSTAIN
 }

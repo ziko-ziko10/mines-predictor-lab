@@ -14,6 +14,10 @@ function percent(value: number) {
   return `${Math.round(value * 100)}%`;
 }
 
+function interval(lower: number, upper: number) {
+  return `${percent(lower)} - ${percent(upper)}`;
+}
+
 export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps) {
   const auth = await getAuthState();
 
@@ -64,6 +68,11 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
             <strong>{analytics.totalRounds}</strong>
             <small>{analytics.note}</small>
           </article>
+          <article className="hero-stat-card">
+            <span>Truth coverage</span>
+            <strong>{percent(analytics.truthCoverage)}</strong>
+            <small>{analytics.truthKnownRounds} rounds have full board truth.</small>
+          </article>
         </div>
 
         <div className="filter-row">
@@ -100,6 +109,11 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
           <strong>Average prediction size</strong>
           <p>{analytics.averagePredictionCount.toFixed(1)}</p>
           <small>User-selectable prediction count across saved rounds.</small>
+        </article>
+        <article className="card stat-card">
+          <strong>Current mode</strong>
+          <p>{analytics.predictionMode}</p>
+          <small>{analytics.abstainReason ?? "The current suggestion set clears the app's minimum sample gate."}</small>
         </article>
       </section>
 
@@ -139,6 +153,7 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
                 <div>
                   <strong>{cell.label}</strong>
                   <small>Risk {percent(cell.riskScore)}</small>
+                  <small>Mine-rate band {interval(cell.mineRateLowerBound, cell.mineRateUpperBound)}</small>
                 </div>
                 <span className="badge">Mine reports {cell.mineReports}</span>
               </article>
@@ -158,6 +173,7 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
                 <div>
                   <strong>{cell.label}</strong>
                   <small>Risk {percent(cell.riskScore)}</small>
+                  <small>Mine-rate band {interval(cell.mineRateLowerBound, cell.mineRateUpperBound)}</small>
                 </div>
                 <span className="badge">Mine reports {cell.mineReports}</span>
               </article>
@@ -172,6 +188,31 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
           <p>The analytics page also shows the current top five recommended cells for this mine count.</p>
         </div>
         <p className="muted-text">{analytics.suggestedCells.map(cellLabel).join(", ") || "No suggestions yet."}</p>
+      </section>
+
+      <section className="card">
+        <div className="section-heading">
+          <h2>Holdout snapshot</h2>
+          <p>{analytics.evaluation.note}</p>
+        </div>
+
+        <div className="summary-grid">
+          <article className="card stat-card">
+            <strong>Holdout rounds</strong>
+            <p>{analytics.evaluation.holdoutRounds}</p>
+            <small>{analytics.evaluation.reliable ? "Enough holdout data for a first pass." : "Still too small for strong trust."}</small>
+          </article>
+          <article className="card stat-card">
+            <strong>Current model safe rate</strong>
+            <p>{percent(analytics.evaluation.currentModel.averageSafeRate)}</p>
+            <small>{interval(analytics.evaluation.currentModel.averageSafeRateLower, analytics.evaluation.currentModel.averageSafeRateUpper)}</small>
+          </article>
+          <article className="card stat-card">
+            <strong>Random baseline</strong>
+            <p>{percent(analytics.evaluation.randomBaseline.averageSafeRate)}</p>
+            <small>Expected safe-cell rate for random picks.</small>
+          </article>
+        </div>
       </section>
     </div>
   );

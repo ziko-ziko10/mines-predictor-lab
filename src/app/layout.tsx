@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import Link from "next/link";
 import type { ReactNode } from "react";
 
@@ -9,6 +9,13 @@ import { getAuthState } from "@/lib/auth";
 export const metadata: Metadata = {
   title: "Mines Predictor Lab",
   description: "Track predictions, log win/loss outcomes, and analyze cell risk per mine count on a 5x5 board.",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  themeColor: "#08111f",
 };
 
 export default async function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
@@ -27,6 +34,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
               <Link href="/">Predict</Link>
               <Link href="/logs">Logs</Link>
               <Link href="/analytics">Analytics</Link>
+              <Link href="/evaluation">Evaluation</Link>
             </nav>
             <div className="topbar-right">
               {!auth.configured ? <span className="status-pill">Add Supabase auth envs</span> : null}

@@ -123,9 +123,13 @@ export default async function LogsPage({ searchParams }: LogsPageProps) {
                   <strong>
                     {round.result === "WON" ? "Win" : "Loss"} | {round.mineCount} mines
                   </strong>
-                  <span className={round.result === "WON" ? "badge success-badge" : "badge danger-badge"}>
-                    {round.result}
-                  </span>
+                  <div className="ranking-metrics">
+                    <span className={round.result === "WON" ? "badge success-badge" : "badge danger-badge"}>{round.result}</span>
+                    <span className={round.predictionMode === "CONFIDENT" ? "badge success-badge" : "badge warning-badge"}>
+                      {round.predictionMode}
+                    </span>
+                    <span className="badge">{round.mineLocations.length === round.mineCount ? "Full board known" : "Partial truth"}</span>
+                  </div>
                 </div>
 
                 <p>{new Date(round.createdAt).toLocaleString()}</p>
@@ -133,6 +137,9 @@ export default async function LogsPage({ searchParams }: LogsPageProps) {
                 <small>Played: {formatCells(round.playedCells)}</small>
                 <small>Hit cell: {round.hitCell ? cellLabel(round.hitCell) : "-"}</small>
                 <small>Mine locations: {formatCells(round.mineLocations)}</small>
+                <small>Server seed: {round.serverSeed ?? "-"}</small>
+                <small>Client seed: {round.clientSeed ?? "-"}</small>
+                <small>Nonce: {round.nonce ?? "-"}</small>
               </article>
             ))}
           </div>

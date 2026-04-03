@@ -9,29 +9,38 @@ import type {
   RoundLog,
   RoundSubmission,
 } from "@/lib/contracts";
-import { buildCellInsights, buildPredictorNote, pickSuggestedCells } from "@/lib/predictor";
+import { buildHoldoutEvaluation } from "@/lib/evaluation";
+import { buildCellInsights, buildPredictionDecision, buildPredictorNote, pickSuggestedCells } from "@/lib/predictor";
 import { roundSubmissionSchema } from "@/lib/validators";
 
 function toRoundLog(round: {
   id: string;
   mineCount: number;
   predictionCount: number;
+  predictionMode: "CONFIDENT" | "EXPLORATORY" | "ABSTAIN";
   predictedCells: string;
   playedCells: string | null;
   result: "WON" | "LOST";
   hitCell: number | null;
   mineLocations: string | null;
+  serverSeed: string | null;
+  clientSeed: string | null;
+  nonce: string | null;
   createdAt: Date;
 }): RoundLog {
   return {
     id: round.id,
     mineCount: round.mineCount,
     predictionCount: round.predictionCount,
+    predictionMode: round.predictionMode,
     predictedCells: parseCells(round.predictedCells),
     playedCells: parseCells(round.playedCells),
     result: round.result,
     hitCell: round.hitCell,
     mineLocations: parseCells(round.mineLocations),
+    serverSeed: round.serverSeed,
+    clientSeed: round.clientSeed,
+    nonce: round.nonce,
     createdAt: round.createdAt.toISOString(),
   };
 }
@@ -82,7 +91,7 @@ export async function getPrediction(userId: string, mineCount: number, predictio
   const [rounds, stats, recentPredictionRows] = await prisma.$transaction([
     prisma.round.findMany({
       where: { userId, mineCount },
-      select: { result: true },
+      select: { result: true, mineLocations: true },
     }),
     prisma.cellStat.findMany({
       where: { userId, mineCount },
@@ -99,14 +108,23 @@ export async function getPrediction(userId: string, mineCount: number, predictio
   const totalRounds = rounds.length;
   const totalWins = rounds.filter((round) => round.result === "WON").length;
   const totalLosses = totalRounds - totalWins;
+  const truthKnownRounds = rounds.filter((round) => Boolean(round.mineLocations)).length;
   const rankedCells = buildCellInsights({
     mineCount,
     totalRounds,
     totalLosses,
+    truthKnownRounds,
     stats,
   });
   const recentPredictions = recentPredictionRows.map((row) => parseCells(row.predictedCells));
+  const decision = buildPredictionDecision(rankedCells, predictionCount, totalRounds, truthKnownRounds);
   const suggestedCells = pickSuggestedCells(rankedCells, predictionCount, recentPredictions);
+  const modeNote =
+    decision.predictionMode === "CONFIDENT"
+      ? "Signal quality is currently above the app's minimum confidence gate."
+      : decision.predictionMode === "EXPLORATORY"
+        ? decision.abstainReason ?? "Signal quality is still exploratory for this mine count."
+        : `${decision.abstainReason ?? "The model abstained."} The cells below are exploratory only.`;
 
   return {
     mineCount,
@@ -114,7 +132,13 @@ export async function getPrediction(userId: string, mineCount: number, predictio
     totalRounds,
     totalWins,
     totalLosses,
-    note: buildPredictorNote(totalRounds, totalLosses),
+    predictionMode: decision.predictionMode,
+    abstainReason: decision.abstainReason,
+    signalScore: decision.signalScore,
+    minimumRoundsForSignal: decision.minimumRoundsForSignal,
+    truthKnownRounds,
+    truthCoverage: totalRounds === 0 ? 0 : truthKnownRounds / totalRounds,
+    note: `${buildPredictorNote(totalRounds, totalLosses)} ${modeNote}`,
     suggestedCells,
     rankedCells,
   };
@@ -131,10 +155,14 @@ export async function logRound(userId: string, input: RoundSubmission) {
     mineCount: number;
     predictionCount: number;
     predictedCells: number[];
+    predictionMode: "CONFIDENT" | "EXPLORATORY" | "ABSTAIN";
     result: "WON" | "LOST";
     playedCells: number[];
     hitCell: number | null;
     mineLocations: number[];
+    serverSeed: string;
+    clientSeed: string;
+    nonce: string;
   };
 
   return prisma.$transaction(async (transaction) => {
@@ -143,11 +171,15 @@ export async function logRound(userId: string, input: RoundSubmission) {
         userId,
         mineCount: parsed.mineCount,
         predictionCount: parsed.predictionCount,
+        predictionMode: parsed.predictionMode,
         predictedCells: serializeCells(parsed.predictedCells),
         playedCells: parsed.playedCells.length > 0 ? serializeCells(parsed.playedCells) : null,
         result: parsed.result,
         hitCell: parsed.hitCell ?? null,
         mineLocations: parsed.mineLocations.length > 0 ? serializeCells(parsed.mineLocations) : null,
+        serverSeed: parsed.serverSeed || null,
+        clientSeed: parsed.clientSeed || null,
+        nonce: parsed.nonce || null,
       },
     });
 
@@ -263,7 +295,7 @@ export async function getRecentRounds(userId: string, mineCount?: number, limit 
 }
 
 export async function getAnalytics(userId: string, mineCount: number): Promise<AnalyticsSnapshot> {
-  const [recentRoundRows, allRoundStats, cellStats] = await prisma.$transaction([
+  const [recentRoundRows, allRoundRows, cellStats] = await prisma.$transaction([
     prisma.round.findMany({
       where: { userId, mineCount },
       orderBy: { createdAt: "desc" },
@@ -271,10 +303,7 @@ export async function getAnalytics(userId: string, mineCount: number): Promise<A
     }),
     prisma.round.findMany({
       where: { userId, mineCount },
-      select: {
-        result: true,
-        predictionCount: true,
-      },
+      orderBy: { createdAt: "desc" },
     }),
     prisma.cellStat.findMany({
       where: { userId, mineCount },
@@ -283,20 +312,41 @@ export async function getAnalytics(userId: string, mineCount: number): Promise<A
   ]);
 
   const recentRounds = recentRoundRows.map(toRoundLog);
-  const totalRounds = allRoundStats.length;
-  const wins = allRoundStats.filter((round) => round.result === "WON").length;
+  const totalRounds = allRoundRows.length;
+  const wins = allRoundRows.filter((round) => round.result === "WON").length;
   const losses = totalRounds - wins;
+  const truthKnownRounds = allRoundRows.filter((round) => Boolean(round.mineLocations)).length;
   const averagePredictionCount =
     totalRounds === 0
       ? 0
-      : allRoundStats.reduce((sum, round) => sum + round.predictionCount, 0) / totalRounds;
+      : allRoundRows.reduce((sum, round) => sum + round.predictionCount, 0) / totalRounds;
   const cells = buildCellInsights({
     mineCount,
     totalRounds,
     totalLosses: losses,
+    truthKnownRounds,
     stats: cellStats,
   });
-  const suggestedCells = pickSuggestedCells(cells, Math.min(5, 25 - mineCount));
+  const decision = buildPredictionDecision(cells, Math.min(5, 25 - mineCount), totalRounds, truthKnownRounds);
+  const recentPredictions = allRoundRows.slice(0, 8).map((row) => parseCells(row.predictedCells));
+  const suggestedCells = pickSuggestedCells(cells, Math.min(5, 25 - mineCount), recentPredictions);
+  const evaluation = buildHoldoutEvaluation(
+    mineCount,
+    allRoundRows.map((row) => ({
+      id: row.id,
+      predictionCount: row.predictionCount,
+      predictedCells: parseCells(row.predictedCells),
+      playedCells: parseCells(row.playedCells),
+      result: row.result,
+      hitCell: row.hitCell,
+      mineLocations: parseCells(row.mineLocations),
+      createdAt: row.createdAt,
+    })),
+  );
+  const modeNote =
+    decision.predictionMode === "CONFIDENT"
+      ? "The current suggestion set clears the minimum confidence gate for this dataset."
+      : decision.abstainReason ?? "The current suggestion set is still exploratory.";
 
   return {
     mineCount,
@@ -304,11 +354,18 @@ export async function getAnalytics(userId: string, mineCount: number): Promise<A
     wins,
     losses,
     averagePredictionCount,
-    note: buildPredictorNote(totalRounds, losses),
+    predictionMode: decision.predictionMode,
+    abstainReason: decision.abstainReason,
+    signalScore: decision.signalScore,
+    minimumRoundsForSignal: decision.minimumRoundsForSignal,
+    truthKnownRounds,
+    truthCoverage: totalRounds === 0 ? 0 : truthKnownRounds / totalRounds,
+    note: `${buildPredictorNote(totalRounds, losses)} ${modeNote}`,
     suggestedCells,
     cells,
     safestCells: cells.slice().sort((left, right) => left.riskScore - right.riskScore).slice(0, 5),
     riskiestCells: cells.slice().sort((left, right) => right.riskScore - left.riskScore).slice(0, 5),
     recentRounds,
+    evaluation,
   };
 }

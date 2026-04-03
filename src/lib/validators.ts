@@ -28,10 +28,14 @@ export const roundSubmissionSchema = z
     mineCount: z.number().int().min(1).max(BOARD_CELL_COUNT - 1),
     predictionCount: z.number().int().min(1).max(BOARD_CELL_COUNT - 1),
     predictedCells: cellArraySchema(1),
+    predictionMode: z.enum(["CONFIDENT", "EXPLORATORY", "ABSTAIN"]).optional().default("CONFIDENT"),
     result: z.enum(["WON", "LOST"]),
     playedCells: cellArraySchema().optional().default([]),
     hitCell: z.number().int().min(1).max(BOARD_CELL_COUNT).nullable().optional(),
     mineLocations: cellArraySchema().optional().default([]),
+    serverSeed: z.string().trim().max(200).optional().default(""),
+    clientSeed: z.string().trim().max(200).optional().default(""),
+    nonce: z.string().trim().max(100).optional().default(""),
   })
   .superRefine((value, context) => {
     if (value.predictedCells.length !== value.predictionCount) {
@@ -67,11 +71,19 @@ export const roundSubmissionSchema = z
         });
       }
 
-      if (value.mineLocations.length > 0 || value.hitCell) {
+      if (value.mineLocations.length > 0 && value.mineLocations.length !== value.mineCount) {
         context.addIssue({
           code: z.ZodIssueCode.custom,
-          path: ["result"],
-          message: "Mine locations and hit cell are only needed for losses.",
+          path: ["mineLocations"],
+          message: "If you know the full board on a win, enter exactly the same number of mine cells as the selected mine count.",
+        });
+      }
+
+      if (value.hitCell) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["hitCell"],
+          message: "Hit cell is only used for losses.",
         });
       }
     }

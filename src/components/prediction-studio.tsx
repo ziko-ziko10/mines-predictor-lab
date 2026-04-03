@@ -117,6 +117,11 @@ export function PredictionStudio({ summaries }: PredictionStudioProps) {
   const [playedCells, setPlayedCells] = useState<number[]>([]);
   const [mineLocations, setMineLocations] = useState<number[]>([]);
   const [hitCell, setHitCell] = useState<number | null>(null);
+  const [knowFullMineLayout, setKnowFullMineLayout] = useState(false);
+  const [serverSeed, setServerSeed] = useState("");
+  const [clientSeed, setClientSeed] = useState("");
+  const [nonce, setNonce] = useState("");
+  const [showAdvancedMeta, setShowAdvancedMeta] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isPredicting, startPrediction] = useTransition();
@@ -133,6 +138,11 @@ export function PredictionStudio({ summaries }: PredictionStudioProps) {
     setPlayedCells([]);
     setMineLocations([]);
     setHitCell(null);
+    setKnowFullMineLayout(false);
+    setServerSeed("");
+    setClientSeed("");
+    setNonce("");
+    setShowAdvancedMeta(false);
   }
 
   function requestPrediction() {
@@ -181,6 +191,11 @@ export function PredictionStudio({ summaries }: PredictionStudioProps) {
       return;
     }
 
+    if (result === "WON" && knowFullMineLayout && mineLocations.length !== mineCount) {
+      setError(`Select exactly ${mineCount} mine cells if you know the full board.`);
+      return;
+    }
+
     setError(null);
     setMessage(null);
 
@@ -195,10 +210,14 @@ export function PredictionStudio({ summaries }: PredictionStudioProps) {
             mineCount: prediction.mineCount,
             predictionCount: prediction.predictionCount,
             predictedCells: prediction.suggestedCells,
+            predictionMode: prediction.predictionMode,
             result,
             playedCells: result === "WON" ? playedCells : [],
             hitCell: result === "LOST" ? hitCell : null,
-            mineLocations: result === "LOST" ? mineLocations : [],
+            mineLocations: result === "LOST" || knowFullMineLayout ? mineLocations : [],
+            serverSeed,
+            clientSeed,
+            nonce,
           }),
         });
         const payload = (await response.json()) as { ok?: boolean; error?: string };
@@ -331,21 +350,43 @@ export function PredictionStudio({ summaries }: PredictionStudioProps) {
             <span className="badge">{prediction.totalRounds} rounds in this dataset</span>
             <span className="badge">{prediction.totalWins} wins</span>
             <span className="badge">{prediction.totalLosses} losses</span>
+            <span className="badge">{prediction.truthKnownRounds} full-board rounds</span>
+            <span className={prediction.predictionMode === "CONFIDENT" ? "badge success-badge" : "badge warning-badge"}>
+              {prediction.predictionMode}
+            </span>
           </div>
         ) : null}
 
         {prediction ? <p className="muted-text">{prediction.note}</p> : null}
         {prediction ? <p className="suggestion-line">Current suggested set: {prediction.suggestedCells.map(cellLabel).join(", ")}</p> : null}
+        {prediction ? (
+          <p className="muted-text">
+            Signal score {percent(prediction.signalScore)} | Truth coverage {percent(prediction.truthCoverage)} | Minimum rounds for signal {prediction.minimumRoundsForSignal}
+          </p>
+        ) : null}
       </section>
 
       {prediction ? (
         <>
-          <Board title="2. Suggested cells" selectedCells={prediction.suggestedCells} suggestedCells={prediction.suggestedCells} />
+          {prediction.predictionMode === "CONFIDENT" ? null : (
+            <section className="notice-banner warning-banner">
+              <strong>{prediction.predictionMode === "ABSTAIN" ? "Model abstained" : "Exploratory mode"}</strong>
+              <p className="muted-text">
+                {prediction.abstainReason ?? "This set is being shown for data gathering and comparison, not as a trusted high-signal prediction."}
+              </p>
+            </section>
+          )}
+
+          <Board
+            title={prediction.predictionMode === "CONFIDENT" ? "2. Suggested cells" : "2. Exploratory cells"}
+            selectedCells={prediction.suggestedCells}
+            suggestedCells={prediction.suggestedCells}
+          />
 
           <section className="card form-card">
             <div className="section-heading">
               <h2>3. Save the result</h2>
-              <p>After you play the round in the other game, come back and log the outcome here.</p>
+              <p>After you play the round in the other game, come back and log the outcome here. More full-board truth means a more honest model.</p>
             </div>
 
             <div className="button-row segmented-row">
@@ -356,6 +397,7 @@ export function PredictionStudio({ summaries }: PredictionStudioProps) {
                   setResult("WON");
                   setMineLocations([]);
                   setHitCell(null);
+                  setKnowFullMineLayout(false);
                 }}
               >
                 Won
@@ -366,6 +408,7 @@ export function PredictionStudio({ summaries }: PredictionStudioProps) {
                 onClick={() => {
                   setResult("LOST");
                   setPlayedCells([]);
+                  setKnowFullMineLayout(true);
                 }}
               >
                 Lost
@@ -394,6 +437,35 @@ export function PredictionStudio({ summaries }: PredictionStudioProps) {
                   lockedCells={prediction.suggestedCells}
                   onSelect={(cellIndex) => setPlayedCells((current) => toggleCell(current, cellIndex))}
                 />
+
+                <div className="truth-toggle-row">
+                  <button
+                    type="button"
+                    className={knowFullMineLayout ? "segment is-active" : "segment"}
+                    onClick={() => {
+                      setKnowFullMineLayout((current) => {
+                        const next = !current;
+
+                        if (!next) {
+                          setMineLocations([]);
+                        }
+
+                        return next;
+                      });
+                    }}
+                  >
+                    {knowFullMineLayout ? "Full board known" : "I know the full board"}
+                  </button>
+                </div>
+
+                {knowFullMineLayout ? (
+                  <Board
+                    title={`Winning round mine locations (${mineLocations.length}/${mineCount})`}
+                    selectedCells={mineLocations}
+                    mineCells={mineLocations}
+                    onSelect={(cellIndex) => setMineLocations((current) => toggleMineCell(current, cellIndex, mineCount))}
+                  />
+                ) : null}
               </>
             ) : (
               <div className="loss-grid-layout">
@@ -424,6 +496,35 @@ export function PredictionStudio({ summaries }: PredictionStudioProps) {
                 />
               </div>
             )}
+
+            <section className="card tone-panel verifier-panel">
+              <div className="section-heading">
+                <h3>Provably fair metadata</h3>
+                <p>Optional. Save seeds or nonce here if the external game exposes them, so verifier support can be added later.</p>
+              </div>
+              <div className="button-row compact-actions">
+                <button type="button" className="secondary-button" onClick={() => setShowAdvancedMeta((value) => !value)}>
+                  {showAdvancedMeta ? "Hide fairness fields" : "Add fairness fields"}
+                </button>
+              </div>
+
+              {showAdvancedMeta ? (
+                <div className="form-grid">
+                  <label>
+                    <span>Server seed</span>
+                    <input type="text" value={serverSeed} onChange={(event) => setServerSeed(event.target.value)} placeholder="Optional" />
+                  </label>
+                  <label>
+                    <span>Client seed</span>
+                    <input type="text" value={clientSeed} onChange={(event) => setClientSeed(event.target.value)} placeholder="Optional" />
+                  </label>
+                  <label>
+                    <span>Nonce</span>
+                    <input type="text" value={nonce} onChange={(event) => setNonce(event.target.value)} placeholder="Optional" />
+                  </label>
+                </div>
+              ) : null}
+            </section>
 
             <div className="button-row">
               <button className="primary-button" type="button" onClick={submitRound} disabled={isPredicting || isSaving}>

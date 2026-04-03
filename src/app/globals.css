@@ -22,6 +22,7 @@
 
 html {
   min-height: 100%;
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
@@ -33,6 +34,8 @@ body {
     radial-gradient(circle at 90% 10%, rgba(92, 233, 255, 0.08), transparent 22%),
     linear-gradient(180deg, #091221 0%, #050b14 100%);
   color: var(--text);
+  overflow-x: hidden;
+  -webkit-tap-highlight-color: transparent;
 }
 
 body::before {
@@ -65,7 +68,12 @@ select {
 .shell {
   width: min(1120px, calc(100vw - 24px));
   margin: 0 auto;
-  padding: 16px 0 28px;
+  padding: max(16px, env(safe-area-inset-top)) max(0px, env(safe-area-inset-right)) max(28px, env(safe-area-inset-bottom))
+    max(0px, env(safe-area-inset-left));
+}
+
+main {
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
 }
 
 .topbar {
@@ -126,6 +134,7 @@ select {
   border-radius: 999px;
   color: var(--muted);
   transition: 160ms ease;
+  white-space: nowrap;
 }
 
 .topnav a:hover,
@@ -148,6 +157,8 @@ select {
   border: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.04);
   color: var(--muted);
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .page-stack {
@@ -548,6 +559,11 @@ select:focus {
   color: #ffc5cb;
 }
 
+.warning-badge {
+  background: rgba(248, 195, 93, 0.14);
+  color: #ffe6a7;
+}
+
 .board-grid,
 .heatmap-grid {
   display: grid;
@@ -600,6 +616,11 @@ select:focus {
 .ranking-row small,
 .log-card small {
   display: block;
+}
+
+.board-cell span,
+.heatmap-cell strong {
+  line-height: 1.1;
 }
 
 .board-cell.is-suggested {
@@ -667,11 +688,27 @@ select:focus {
   text-align: center;
 }
 
+.truth-toggle-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.verifier-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
 .notice-banner {
   margin: 0;
   padding: 14px 16px;
   border-radius: 16px;
   border: 1px solid rgba(126, 156, 212, 0.16);
+}
+
+.notice-banner p {
+  margin: 6px 0 0;
 }
 
 .success-banner {
@@ -680,6 +717,10 @@ select:focus {
 
 .error-banner {
   background: rgba(255, 111, 122, 0.1);
+}
+
+.warning-banner {
+  background: rgba(248, 195, 93, 0.1);
 }
 
 @media (max-width: 880px) {
@@ -695,9 +736,9 @@ select:focus {
     width: min(100vw - 14px, 1120px);
   }
 
-   .topbar {
+  .topbar {
     top: 8px;
-   }
+  }
 
   .card {
     padding: 16px;
@@ -725,9 +766,25 @@ select:focus {
 
   .auth-mode-row,
   .button-row,
-  .filter-row,
   .topnav {
     width: 100%;
+  }
+
+  .topnav a {
+    flex: 1 1 0;
+    text-align: center;
+  }
+
+  .filter-row {
+    width: 100%;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 4px;
+    scrollbar-width: none;
+  }
+
+  .filter-row::-webkit-scrollbar {
+    display: none;
   }
 
   .hero-side {
@@ -741,5 +798,104 @@ select:focus {
   .topbar-right,
   .session-controls {
     justify-content: flex-start;
+  }
+}
+
+@media (max-width: 640px) {
+  .shell {
+    width: min(100vw - 10px, 1120px);
+  }
+
+  .topbar {
+    position: static;
+    padding: 12px 14px;
+    margin-bottom: 16px;
+  }
+
+  .brand-name {
+    font-size: 0.96rem;
+  }
+
+  .brand-mark small {
+    font-size: 0.76rem;
+  }
+
+  .hero-copy h1 {
+    font-size: clamp(1.65rem, 8vw, 2.2rem);
+  }
+
+  .hero-stat-grid,
+  .compact-hero-stats,
+  .summary-grid,
+  .analytics-columns,
+  .auth-showcase-grid,
+  .form-grid,
+  .loss-grid-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .hero-stat-card {
+    min-height: auto;
+  }
+
+  .board-grid,
+  .heatmap-grid {
+    width: min(100%, 332px);
+  }
+
+  .board-cell,
+  .heatmap-cell {
+    padding: 7px;
+  }
+
+  .board-cell span,
+  .heatmap-cell strong {
+    font-size: 0.84rem;
+  }
+
+  .board-cell small,
+  .heatmap-cell small {
+    font-size: 0.68rem;
+  }
+
+  .status-pill,
+  .user-pill,
+  .topnav a,
+  .ghost-button,
+  .filter-chip,
+  .primary-button,
+  .secondary-button,
+  .segment,
+  input,
+  select {
+    min-height: 44px;
+  }
+}
+
+@media (max-width: 420px) {
+  .shell {
+    width: calc(100vw - 8px);
+  }
+
+  .card {
+    padding: 14px;
+  }
+
+  .board-grid,
+  .heatmap-grid {
+    width: min(100%, 304px);
+  }
+
+  .topnav {
+    gap: 8px;
+  }
+
+  .topnav a,
+  .ghost-button,
+  .filter-chip,
+  .status-pill,
+  .user-pill {
+    padding-inline: 12px;
+    font-size: 0.88rem;
   }
 }
