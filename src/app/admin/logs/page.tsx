@@ -55,6 +55,9 @@ export default async function AdminLogsPage({ searchParams }: AdminLogsPageProps
   const rounds = await getAdminRecentRounds(Number.isFinite(selectedMineCount) ? selectedMineCount : undefined);
   const totalRounds = summaries.reduce((sum, summary) => sum + summary.totalRounds, 0);
   const totalWins = summaries.reduce((sum, summary) => sum + summary.wins, 0);
+  const exportQuery = selectedMineCount ? `?scope=all&mineCount=${selectedMineCount}` : "?scope=all";
+  const csvExportHref = `/api/logs/export${exportQuery}`;
+  const jsonExportHref = `/api/logs/export${exportQuery}&format=json`;
 
   return (
     <div className="page-stack">
@@ -98,6 +101,15 @@ export default async function AdminLogsPage({ searchParams }: AdminLogsPageProps
               {summary.mineCount} mines
             </Link>
           ))}
+        </div>
+
+        <div className="button-row">
+          <a className="ghost-button" href={csvExportHref}>
+            Download CSV
+          </a>
+          <a className="ghost-button" href={jsonExportHref}>
+            Download JSON
+          </a>
         </div>
       </section>
 

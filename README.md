@@ -101,3 +101,8 @@ For deployment, use Vercel for the app and keep both `DATABASE_URL` and `DIRECT_
 - Add your admin email address to `ADMIN_EMAILS`
 - Sign in with that same email
 - Open `/admin/logs` to view the global log archive across all users
+
+## Log downloads
+
+- User logs page supports `Download CSV` and `Download JSON`
+- Admin logs page supports the same exports for global logs
