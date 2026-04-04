@@ -41,6 +41,16 @@ function toggleMineCell(current: number[], cellIndex: number, mineCount: number)
   return [...current, cellIndex].sort((left, right) => left - right);
 }
 
+function deriveAutoDetectedOutcome(playedCells: number[], mineLocations: number[]) {
+  const hitCandidates = playedCells.filter((cell) => mineLocations.includes(cell));
+
+  return {
+    result: hitCandidates.length > 0 ? ("LOST" as const) : ("WON" as const),
+    hitCandidates,
+    autoHitCell: hitCandidates.length === 1 ? hitCandidates[0] : null,
+  };
+}
+
 function Board({
   title,
   selectedCells,
@@ -131,6 +141,12 @@ export function PredictionStudio({ summaries }: PredictionStudioProps) {
   const totalRoundsTracked = summaries.reduce((sum, summary) => sum + summary.totalRounds, 0);
   const totalWinsTracked = summaries.reduce((sum, summary) => sum + summary.wins, 0);
   const hottestDataset = summaries.slice().sort((left, right) => right.totalRounds - left.totalRounds)[0] ?? null;
+  const fullTruthReady = mineLocations.length === mineCount;
+  const autoDetection = playedCells.length > 0 && fullTruthReady ? deriveAutoDetectedOutcome(playedCells, mineLocations) : null;
+  const resolvedResult = autoDetection?.result ?? result;
+  const requiresManualHitChoice = autoDetection?.result === "LOST" && autoDetection.hitCandidates.length > 1;
+  const resolvedHitCell = autoDetection?.result === "LOST" ? autoDetection.autoHitCell ?? hitCell : result === "LOST" ? hitCell : null;
+  const showMineLocationBoard = knowFullMineLayout || result === "LOST";
 
   function resetRoundState(nextPrediction: PredictionResponse | null = null) {
     setPrediction(nextPrediction);
@@ -176,25 +192,34 @@ export function PredictionStudio({ summaries }: PredictionStudioProps) {
       return;
     }
 
-    if (result === "WON" && playedCells.length === 0) {
-      setError("Select the predicted cells that were actually played in the winning round.");
+    if (playedCells.length === 0) {
+      setError("Select the predicted cells that were actually played in the round.");
       return;
     }
 
-    if (result === "LOST" && mineLocations.length !== mineCount) {
+    if (autoDetection && autoDetection.result === "LOST" && !resolvedHitCell) {
+      setError("Select which overlapping played cell actually caused the loss.");
+      return;
+    }
+
+    if (!autoDetection && result === "LOST" && mineLocations.length !== mineCount) {
       setError(`Select exactly ${mineCount} mine cells before saving the loss.`);
       return;
     }
 
-    if (result === "LOST" && !hitCell) {
+    if (!autoDetection && result === "LOST" && !hitCell) {
       setError("Select the hit cell before saving the loss.");
       return;
     }
 
-    if (result === "WON" && knowFullMineLayout && mineLocations.length !== mineCount) {
+    if (!autoDetection && result === "WON" && knowFullMineLayout && mineLocations.length !== mineCount) {
       setError(`Select exactly ${mineCount} mine cells if you know the full board.`);
       return;
     }
+
+    const finalResult = autoDetection?.result ?? result;
+    const finalMineLocations = showMineLocationBoard ? mineLocations : [];
+    const finalHitCell = finalResult === "LOST" ? resolvedHitCell : null;
 
     setError(null);
     setMessage(null);
@@ -211,10 +236,10 @@ export function PredictionStudio({ summaries }: PredictionStudioProps) {
             predictionCount: prediction.predictionCount,
             predictedCells: prediction.suggestedCells,
             predictionMode: prediction.predictionMode,
-            result,
-            playedCells: result === "WON" ? playedCells : [],
-            hitCell: result === "LOST" ? hitCell : null,
-            mineLocations: result === "LOST" || knowFullMineLayout ? mineLocations : [],
+            result: finalResult,
+            playedCells,
+            hitCell: finalHitCell,
+            mineLocations: finalMineLocations,
             serverSeed,
             clientSeed,
             nonce,
@@ -389,85 +414,47 @@ export function PredictionStudio({ summaries }: PredictionStudioProps) {
               <p>After you play the round in the other game, come back and log the outcome here. More full-board truth means a more honest model.</p>
             </div>
 
-            <div className="button-row segmented-row">
-              <button
-                type="button"
-                className={result === "WON" ? "segment is-active" : "segment"}
-                onClick={() => {
-                  setResult("WON");
-                  setMineLocations([]);
-                  setHitCell(null);
-                  setKnowFullMineLayout(false);
-                }}
-              >
-                Won
+            <p className="muted-text">Select which predicted cells you actually used. If you also enter the full mine layout, the app will auto-detect win or loss.</p>
+
+            <div className="button-row compact-actions">
+              <button type="button" className="secondary-button" onClick={() => setPlayedCells(prediction.suggestedCells)}>
+                Select all predicted
               </button>
-              <button
-                type="button"
-                className={result === "LOST" ? "segment is-active" : "segment"}
-                onClick={() => {
-                  setResult("LOST");
-                  setPlayedCells([]);
-                  setKnowFullMineLayout(true);
-                }}
-              >
-                Lost
+              <button type="button" className="secondary-button" onClick={() => setPlayedCells([])}>
+                Clear selection
               </button>
             </div>
 
-            {result === "WON" ? (
-              <>
-                <p className="muted-text">Select which predicted cells you actually used in the winning round.</p>
-                <div className="button-row compact-actions">
-                  <button
-                    type="button"
-                    className="secondary-button"
-                    onClick={() => setPlayedCells(prediction.suggestedCells)}
-                  >
-                    Select all predicted
-                  </button>
-                  <button type="button" className="secondary-button" onClick={() => setPlayedCells([])}>
-                    Clear selection
-                  </button>
-                </div>
-                <Board
-                  title="Winning cells used"
-                  selectedCells={playedCells}
-                  suggestedCells={prediction.suggestedCells}
-                  lockedCells={prediction.suggestedCells}
-                  onSelect={(cellIndex) => setPlayedCells((current) => toggleCell(current, cellIndex))}
-                />
+            <Board
+              title="Played predicted cells"
+              selectedCells={playedCells}
+              suggestedCells={prediction.suggestedCells}
+              lockedCells={prediction.suggestedCells}
+              onSelect={(cellIndex) => setPlayedCells((current) => toggleCell(current, cellIndex))}
+            />
 
-                <div className="truth-toggle-row">
-                  <button
-                    type="button"
-                    className={knowFullMineLayout ? "segment is-active" : "segment"}
-                    onClick={() => {
-                      setKnowFullMineLayout((current) => {
-                        const next = !current;
+            <div className="truth-toggle-row">
+              <button
+                type="button"
+                className={knowFullMineLayout ? "segment is-active" : "segment"}
+                onClick={() => {
+                  setKnowFullMineLayout((current) => {
+                    const next = !current;
 
-                        if (!next) {
-                          setMineLocations([]);
-                        }
+                    if (!next && result !== "LOST") {
+                      setMineLocations([]);
+                      setHitCell(null);
+                    }
 
-                        return next;
-                      });
-                    }}
-                  >
-                    {knowFullMineLayout ? "Full board known" : "I know the full board"}
-                  </button>
-                </div>
+                    return next;
+                  });
+                }}
+              >
+                {knowFullMineLayout ? "Full board enabled" : "I know the full board"}
+              </button>
+            </div>
 
-                {knowFullMineLayout ? (
-                  <Board
-                    title={`Winning round mine locations (${mineLocations.length}/${mineCount})`}
-                    selectedCells={mineLocations}
-                    mineCells={mineLocations}
-                    onSelect={(cellIndex) => setMineLocations((current) => toggleMineCell(current, cellIndex, mineCount))}
-                  />
-                ) : null}
-              </>
-            ) : (
+            {showMineLocationBoard ? (
               <div className="loss-grid-layout">
                 <Board
                   title={`Mine locations (${mineLocations.length}/${mineCount})`}
@@ -475,27 +462,85 @@ export function PredictionStudio({ summaries }: PredictionStudioProps) {
                   mineCells={mineLocations}
                   onSelect={(cellIndex) => {
                     setMineLocations((current) => {
-                      const next = toggleMineCell(current, cellIndex, mineCount);
+                        const next = toggleMineCell(current, cellIndex, mineCount);
 
-                      if (hitCell && !next.includes(hitCell)) {
-                        setHitCell(null);
-                      }
+                        if (hitCell && !next.includes(hitCell)) {
+                          setHitCell(null);
+                        }
 
                       return next;
                     });
                   }}
                 />
 
-                <Board
-                  title="Hit cell"
-                  selectedCells={hitCell ? [hitCell] : []}
-                  mineCells={mineLocations}
-                  lockedCells={mineLocations}
-                  selectedNumberTone="warning"
-                  onSelect={(cellIndex) => setHitCell(cellIndex)}
-                />
+                {resolvedResult === "LOST" ? (
+                  <Board
+                    title={requiresManualHitChoice ? "Actual hit cell" : "Detected hit cell"}
+                    selectedCells={resolvedHitCell ? [resolvedHitCell] : []}
+                    mineCells={mineLocations}
+                    lockedCells={requiresManualHitChoice ? autoDetection?.hitCandidates ?? mineLocations : resolvedHitCell ? [resolvedHitCell] : []}
+                    disabled={!requiresManualHitChoice}
+                    selectedNumberTone="warning"
+                    onSelect={(cellIndex) => setHitCell(cellIndex)}
+                  />
+                ) : null}
               </div>
-            )}
+            ) : null}
+
+            {autoDetection ? (
+              <section className={autoDetection.result === "WON" ? "notice-banner success-banner" : "notice-banner warning-banner"}>
+                <strong>Auto-detected result: {autoDetection.result}</strong>
+                <p className="muted-text">
+                  {autoDetection.result === "WON"
+                    ? "None of the played predicted cells overlap the reported mine locations."
+                    : requiresManualHitChoice
+                      ? "More than one played cell overlaps the mine layout. Pick the actual hit cell above."
+                      : `The hit cell was auto-detected as ${cellLabel(resolvedHitCell ?? autoDetection.autoHitCell ?? autoDetection.hitCandidates[0] ?? 1)}.`}
+                </p>
+              </section>
+            ) : null}
+
+            {!autoDetection ? (
+              <>
+                <p className="muted-text">If you do not know the full board, use the manual status fallback below.</p>
+                <div className="button-row segmented-row">
+                  <button
+                    type="button"
+                    className={result === "WON" ? "segment is-active" : "segment"}
+                    onClick={() => {
+                      setResult("WON");
+                      if (!knowFullMineLayout) {
+                        setMineLocations([]);
+                      }
+                      setHitCell(null);
+                    }}
+                  >
+                    Won
+                  </button>
+                  <button
+                    type="button"
+                    className={result === "LOST" ? "segment is-active" : "segment"}
+                    onClick={() => {
+                      setResult("LOST");
+                      setKnowFullMineLayout(true);
+                    }}
+                  >
+                    Lost
+                  </button>
+                </div>
+
+                {result === "LOST" ? (
+                  <Board
+                    title="Hit cell"
+                    selectedCells={hitCell ? [hitCell] : []}
+                    mineCells={mineLocations}
+                    lockedCells={mineLocations}
+                    selectedNumberTone="warning"
+                    onSelect={(cellIndex) => setHitCell(cellIndex)}
+                  />
+                ) : null}
+              </>
+            ) : null}
 
             <section className="card tone-panel verifier-panel">
               <div className="section-heading">

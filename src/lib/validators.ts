@@ -54,23 +54,23 @@ export const roundSubmissionSchema = z
       });
     }
 
+    if (value.playedCells.length === 0) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["playedCells"],
+        message: "Select the predicted cells that were actually played.",
+      });
+    }
+
+    if (!isSubset(value.playedCells, value.predictedCells)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["playedCells"],
+        message: "Played cells must be chosen from the prediction list.",
+      });
+    }
+
     if (value.result === "WON") {
-      if (value.playedCells.length === 0) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["playedCells"],
-          message: "Select the predicted cells that were actually played.",
-        });
-      }
-
-      if (!isSubset(value.playedCells, value.predictedCells)) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["playedCells"],
-          message: "Played cells must be chosen from the prediction list.",
-        });
-      }
-
       if (value.mineLocations.length > 0 && value.mineLocations.length !== value.mineCount) {
         context.addIssue({
           code: z.ZodIssueCode.custom,
