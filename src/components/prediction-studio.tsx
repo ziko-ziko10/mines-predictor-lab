@@ -123,6 +123,7 @@ export function PredictionStudio({ summaries }: PredictionStudioProps) {
   const [mineCount, setMineCount] = useState(3);
   const [predictionCount, setPredictionCount] = useState(3);
   const [prediction, setPrediction] = useState<PredictionResponse | null>(null);
+  const [resultStep, setResultStep] = useState<"played" | "truth">("played");
   const [result, setResult] = useState<RoundResult>("WON");
   const [playedCells, setPlayedCells] = useState<number[]>([]);
   const [mineLocations, setMineLocations] = useState<number[]>([]);
@@ -146,10 +147,11 @@ export function PredictionStudio({ summaries }: PredictionStudioProps) {
   const resolvedResult = autoDetection?.result ?? result;
   const requiresManualHitChoice = autoDetection?.result === "LOST" && autoDetection.hitCandidates.length > 1;
   const resolvedHitCell = autoDetection?.result === "LOST" ? autoDetection.autoHitCell ?? hitCell : result === "LOST" ? hitCell : null;
-  const showMineLocationBoard = knowFullMineLayout || result === "LOST";
+  const showMineLocationBoard = resultStep === "truth" && (knowFullMineLayout || result === "LOST");
 
   function resetRoundState(nextPrediction: PredictionResponse | null = null) {
     setPrediction(nextPrediction);
+    setResultStep("played");
     setResult("WON");
     setPlayedCells([]);
     setMineLocations([]);
@@ -184,6 +186,17 @@ export function PredictionStudio({ summaries }: PredictionStudioProps) {
         setError(nextError);
       }
     });
+  }
+
+  function goToTruthStep() {
+    if (playedCells.length === 0) {
+      setError("Select the predicted cells you actually played before moving to the bomb locations step.");
+      return;
+    }
+
+    setError(null);
+    setResultStep("truth");
+    setKnowFullMineLayout(true);
   }
 
   function submitRound() {
@@ -414,168 +427,191 @@ export function PredictionStudio({ summaries }: PredictionStudioProps) {
               <p>After you play the round in the other game, come back and log the outcome here. More full-board truth means a more honest model.</p>
             </div>
 
-            <p className="muted-text">Select which predicted cells you actually used. If you also enter the full mine layout, the app will auto-detect win or loss.</p>
+            {resultStep === "played" ? (
+              <>
+                <p className="muted-text">Select which predicted cells you actually used, then continue to the bomb-location step.</p>
 
-            <div className="button-row compact-actions">
-              <button type="button" className="secondary-button" onClick={() => setPlayedCells(prediction.suggestedCells)}>
-                Select all predicted
-              </button>
-              <button type="button" className="secondary-button" onClick={() => setPlayedCells([])}>
-                Clear selection
-              </button>
-            </div>
+                <div className="button-row compact-actions">
+                  <button type="button" className="secondary-button" onClick={() => setPlayedCells(prediction.suggestedCells)}>
+                    Select all predicted
+                  </button>
+                  <button type="button" className="secondary-button" onClick={() => setPlayedCells([])}>
+                    Clear selection
+                  </button>
+                </div>
 
-            <Board
-              title="Played predicted cells"
-              selectedCells={playedCells}
-              suggestedCells={prediction.suggestedCells}
-              lockedCells={prediction.suggestedCells}
-              onSelect={(cellIndex) => setPlayedCells((current) => toggleCell(current, cellIndex))}
-            />
-
-            <div className="truth-toggle-row">
-              <button
-                type="button"
-                className={knowFullMineLayout ? "segment is-active" : "segment"}
-                onClick={() => {
-                  setKnowFullMineLayout((current) => {
-                    const next = !current;
-
-                    if (!next && result !== "LOST") {
-                      setMineLocations([]);
-                      setHitCell(null);
-                    }
-
-                    return next;
-                  });
-                }}
-              >
-                {knowFullMineLayout ? "Full board enabled" : "I know the full board"}
-              </button>
-            </div>
-
-            {showMineLocationBoard ? (
-              <div className="loss-grid-layout">
                 <Board
-                  title={`Mine locations (${mineLocations.length}/${mineCount})`}
-                  selectedCells={mineLocations}
-                  mineCells={mineLocations}
-                  onSelect={(cellIndex) => {
-                    setMineLocations((current) => {
-                        const next = toggleMineCell(current, cellIndex, mineCount);
+                  title="Played predicted cells"
+                  selectedCells={playedCells}
+                  suggestedCells={prediction.suggestedCells}
+                  lockedCells={prediction.suggestedCells}
+                  onSelect={(cellIndex) => setPlayedCells((current) => toggleCell(current, cellIndex))}
+                />
 
-                        if (hitCell && !next.includes(hitCell)) {
+                <div className="button-row">
+                  <button className="primary-button" type="button" onClick={goToTruthStep} disabled={isPredicting || isSaving}>
+                    Next: Where were the bombs?
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="section-heading">
+                  <h3>4. Where were the bombs?</h3>
+                  <p>Enter the mine locations if you know them. With full board truth, the app auto-detects win or loss.</p>
+                </div>
+
+                <div className="button-row compact-actions">
+                  <button type="button" className="secondary-button" onClick={() => setResultStep("played")}>
+                    Back to played cells
+                  </button>
+                </div>
+
+                <div className="truth-toggle-row">
+                  <button
+                    type="button"
+                    className={knowFullMineLayout ? "segment is-active" : "segment"}
+                    onClick={() => {
+                      setKnowFullMineLayout((current) => {
+                        const next = !current;
+
+                        if (!next && result !== "LOST") {
+                          setMineLocations([]);
                           setHitCell(null);
                         }
 
-                      return next;
-                    });
-                  }}
-                />
-
-                {resolvedResult === "LOST" ? (
-                  <Board
-                    title={requiresManualHitChoice ? "Actual hit cell" : "Detected hit cell"}
-                    selectedCells={resolvedHitCell ? [resolvedHitCell] : []}
-                    mineCells={mineLocations}
-                    lockedCells={requiresManualHitChoice ? autoDetection?.hitCandidates ?? mineLocations : resolvedHitCell ? [resolvedHitCell] : []}
-                    disabled={!requiresManualHitChoice}
-                    selectedNumberTone="warning"
-                    onSelect={(cellIndex) => setHitCell(cellIndex)}
-                  />
-                ) : null}
-              </div>
-            ) : null}
-
-            {autoDetection ? (
-              <section className={autoDetection.result === "WON" ? "notice-banner success-banner" : "notice-banner warning-banner"}>
-                <strong>Auto-detected result: {autoDetection.result}</strong>
-                <p className="muted-text">
-                  {autoDetection.result === "WON"
-                    ? "None of the played predicted cells overlap the reported mine locations."
-                    : requiresManualHitChoice
-                      ? "More than one played cell overlaps the mine layout. Pick the actual hit cell above."
-                      : `The hit cell was auto-detected as ${cellLabel(resolvedHitCell ?? autoDetection.autoHitCell ?? autoDetection.hitCandidates[0] ?? 1)}.`}
-                </p>
-              </section>
-            ) : null}
-
-            {!autoDetection ? (
-              <>
-                <p className="muted-text">If you do not know the full board, use the manual status fallback below.</p>
-                <div className="button-row segmented-row">
-                  <button
-                    type="button"
-                    className={result === "WON" ? "segment is-active" : "segment"}
-                    onClick={() => {
-                      setResult("WON");
-                      if (!knowFullMineLayout) {
-                        setMineLocations([]);
-                      }
-                      setHitCell(null);
+                        return next;
+                      });
                     }}
                   >
-                    Won
-                  </button>
-                  <button
-                    type="button"
-                    className={result === "LOST" ? "segment is-active" : "segment"}
-                    onClick={() => {
-                      setResult("LOST");
-                      setKnowFullMineLayout(true);
-                    }}
-                  >
-                    Lost
+                    {knowFullMineLayout ? "Full board enabled" : "I know the full board"}
                   </button>
                 </div>
 
-                {result === "LOST" ? (
-                  <Board
-                    title="Hit cell"
-                    selectedCells={hitCell ? [hitCell] : []}
-                    mineCells={mineLocations}
-                    lockedCells={mineLocations}
-                    selectedNumberTone="warning"
-                    onSelect={(cellIndex) => setHitCell(cellIndex)}
-                  />
+                {showMineLocationBoard ? (
+                  <div className="loss-grid-layout">
+                    <Board
+                      title={`Mine locations (${mineLocations.length}/${mineCount})`}
+                      selectedCells={mineLocations}
+                      mineCells={mineLocations}
+                      onSelect={(cellIndex) => {
+                        setMineLocations((current) => {
+                          const next = toggleMineCell(current, cellIndex, mineCount);
+
+                          if (hitCell && !next.includes(hitCell)) {
+                            setHitCell(null);
+                          }
+
+                          return next;
+                        });
+                      }}
+                    />
+
+                    {resolvedResult === "LOST" ? (
+                      <Board
+                        title={requiresManualHitChoice ? "Actual hit cell" : "Detected hit cell"}
+                        selectedCells={resolvedHitCell ? [resolvedHitCell] : []}
+                        mineCells={mineLocations}
+                        lockedCells={requiresManualHitChoice ? autoDetection?.hitCandidates ?? mineLocations : resolvedHitCell ? [resolvedHitCell] : []}
+                        disabled={!requiresManualHitChoice}
+                        selectedNumberTone="warning"
+                        onSelect={(cellIndex) => setHitCell(cellIndex)}
+                      />
+                    ) : null}
+                  </div>
                 ) : null}
+
+                {autoDetection ? (
+                  <section className={autoDetection.result === "WON" ? "notice-banner success-banner" : "notice-banner warning-banner"}>
+                    <strong>Auto-detected result: {autoDetection.result}</strong>
+                    <p className="muted-text">
+                      {autoDetection.result === "WON"
+                        ? "None of the played predicted cells overlap the reported mine locations."
+                        : requiresManualHitChoice
+                          ? "More than one played cell overlaps the mine layout. Pick the actual hit cell above."
+                          : `The hit cell was auto-detected as ${cellLabel(resolvedHitCell ?? autoDetection.autoHitCell ?? autoDetection.hitCandidates[0] ?? 1)}.`}
+                    </p>
+                  </section>
+                ) : null}
+
+                {!autoDetection ? (
+                  <>
+                    <p className="muted-text">If you do not know the full board, use the manual status fallback below.</p>
+                    <div className="button-row segmented-row">
+                      <button
+                        type="button"
+                        className={result === "WON" ? "segment is-active" : "segment"}
+                        onClick={() => {
+                          setResult("WON");
+                          if (!knowFullMineLayout) {
+                            setMineLocations([]);
+                          }
+                          setHitCell(null);
+                        }}
+                      >
+                        Won
+                      </button>
+                      <button
+                        type="button"
+                        className={result === "LOST" ? "segment is-active" : "segment"}
+                        onClick={() => {
+                          setResult("LOST");
+                          setKnowFullMineLayout(true);
+                        }}
+                      >
+                        Lost
+                      </button>
+                    </div>
+
+                    {result === "LOST" ? (
+                      <Board
+                        title="Hit cell"
+                        selectedCells={hitCell ? [hitCell] : []}
+                        mineCells={mineLocations}
+                        lockedCells={mineLocations}
+                        selectedNumberTone="warning"
+                        onSelect={(cellIndex) => setHitCell(cellIndex)}
+                      />
+                    ) : null}
+                  </>
+                ) : null}
+
+                <section className="card tone-panel verifier-panel">
+                  <div className="section-heading">
+                    <h3>Provably fair metadata</h3>
+                    <p>Optional. Save seeds or nonce here if the external game exposes them, so verifier support can be added later.</p>
+                  </div>
+                  <div className="button-row compact-actions">
+                    <button type="button" className="secondary-button" onClick={() => setShowAdvancedMeta((value) => !value)}>
+                      {showAdvancedMeta ? "Hide fairness fields" : "Add fairness fields"}
+                    </button>
+                  </div>
+
+                  {showAdvancedMeta ? (
+                    <div className="form-grid">
+                      <label>
+                        <span>Server seed</span>
+                        <input type="text" value={serverSeed} onChange={(event) => setServerSeed(event.target.value)} placeholder="Optional" />
+                      </label>
+                      <label>
+                        <span>Client seed</span>
+                        <input type="text" value={clientSeed} onChange={(event) => setClientSeed(event.target.value)} placeholder="Optional" />
+                      </label>
+                      <label>
+                        <span>Nonce</span>
+                        <input type="text" value={nonce} onChange={(event) => setNonce(event.target.value)} placeholder="Optional" />
+                      </label>
+                    </div>
+                  ) : null}
+                </section>
+
+                <div className="button-row">
+                  <button className="primary-button" type="button" onClick={submitRound} disabled={isPredicting || isSaving}>
+                    {isSaving ? "Saving..." : "Save round"}
+                  </button>
+                </div>
               </>
-            ) : null}
-
-            <section className="card tone-panel verifier-panel">
-              <div className="section-heading">
-                <h3>Provably fair metadata</h3>
-                <p>Optional. Save seeds or nonce here if the external game exposes them, so verifier support can be added later.</p>
-              </div>
-              <div className="button-row compact-actions">
-                <button type="button" className="secondary-button" onClick={() => setShowAdvancedMeta((value) => !value)}>
-                  {showAdvancedMeta ? "Hide fairness fields" : "Add fairness fields"}
-                </button>
-              </div>
-
-              {showAdvancedMeta ? (
-                <div className="form-grid">
-                  <label>
-                    <span>Server seed</span>
-                    <input type="text" value={serverSeed} onChange={(event) => setServerSeed(event.target.value)} placeholder="Optional" />
-                  </label>
-                  <label>
-                    <span>Client seed</span>
-                    <input type="text" value={clientSeed} onChange={(event) => setClientSeed(event.target.value)} placeholder="Optional" />
-                  </label>
-                  <label>
-                    <span>Nonce</span>
-                    <input type="text" value={nonce} onChange={(event) => setNonce(event.target.value)} placeholder="Optional" />
-                  </label>
-                </div>
-              ) : null}
-            </section>
-
-            <div className="button-row">
-              <button className="primary-button" type="button" onClick={submitRound} disabled={isPredicting || isSaving}>
-                {isSaving ? "Saving..." : "Save round"}
-              </button>
-            </div>
+            )}
           </section>
 
           <section className="card ranking-card">
