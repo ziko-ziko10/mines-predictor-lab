@@ -6,6 +6,26 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 export interface AuthState {
   configured: boolean;
   user: User | null;
+  isAdmin: boolean;
+}
+
+const BUILT_IN_ADMIN_EMAILS = ["zikoozelzoz@gmail.com"];
+
+function getAdminEmails() {
+  const envEmails = (process.env.ADMIN_EMAILS ?? "")
+    .split(",")
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
+
+  return Array.from(new Set([...BUILT_IN_ADMIN_EMAILS, ...envEmails]));
+}
+
+export function isAdminEmail(email: string | null | undefined) {
+  if (!email) {
+    return false;
+  }
+
+  return getAdminEmails().includes(email.trim().toLowerCase());
 }
 
 export async function getAuthState(): Promise<AuthState> {
@@ -13,6 +33,7 @@ export async function getAuthState(): Promise<AuthState> {
     return {
       configured: false,
       user: null,
+      isAdmin: false,
     };
   }
 
@@ -26,11 +47,13 @@ export async function getAuthState(): Promise<AuthState> {
     return {
       configured: true,
       user: null,
+      isAdmin: false,
     };
   }
 
   return {
     configured: true,
     user,
+    isAdmin: isAdminEmail(user?.email),
   };
 }

@@ -71,6 +71,7 @@ DATABASE_URL="postgresql://postgres.your-project-ref:YOUR_PASSWORD@aws-1-your-re
 DIRECT_URL="postgresql://postgres.your-project-ref:YOUR_PASSWORD@aws-1-your-region.pooler.supabase.com:5432/postgres"
 NEXT_PUBLIC_SUPABASE_URL="https://your-project.supabase.co"
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY="your-supabase-publishable-key"
+ADMIN_EMAILS="admin1@example.com,admin2@example.com"
 ```
 
 ## Logging rules
@@ -94,3 +95,9 @@ NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY="your-supabase-publishable-key"
 ## Deployment notes
 
 For deployment, use Vercel for the app and keep both `DATABASE_URL` and `DIRECT_URL` pointed at your hosted Supabase Postgres instance.
+
+## Admin logs
+
+- Add your admin email address to `ADMIN_EMAILS`
+- Sign in with that same email
+- Open `/admin/logs` to view the global log archive across all users

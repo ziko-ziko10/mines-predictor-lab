@@ -74,6 +74,7 @@ export interface RoundSubmission {
 
 export interface RoundLog {
   id: string;
+  userId: string;
   mineCount: number;
   predictionCount: number;
   predictionMode: PredictionMode;

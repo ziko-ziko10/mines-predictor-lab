@@ -15,6 +15,7 @@ import { roundSubmissionSchema } from "@/lib/validators";
 
 function toRoundLog(round: {
   id: string;
+  userId: string;
   mineCount: number;
   predictionCount: number;
   predictionMode: "CONFIDENT" | "EXPLORATORY" | "ABSTAIN";
@@ -30,6 +31,7 @@ function toRoundLog(round: {
 }): RoundLog {
   return {
     id: round.id,
+    userId: round.userId,
     mineCount: round.mineCount,
     predictionCount: round.predictionCount,
     predictionMode: round.predictionMode,
@@ -50,6 +52,45 @@ export async function getMineCountSummaries(userId: string): Promise<MineCountSu
     where: {
       userId,
     },
+    select: {
+      mineCount: true,
+      result: true,
+      createdAt: true,
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+  });
+
+  const summaryMap = new Map<number, MineCountSummary>();
+
+  for (const round of rounds) {
+    const existing = summaryMap.get(round.mineCount) ?? {
+      mineCount: round.mineCount,
+      totalRounds: 0,
+      wins: 0,
+      losses: 0,
+      winRate: 0,
+      lastPlayedAt: null,
+    };
+
+    existing.totalRounds += 1;
+    existing.wins += round.result === "WON" ? 1 : 0;
+    existing.losses += round.result === "LOST" ? 1 : 0;
+    existing.lastPlayedAt = existing.lastPlayedAt ?? round.createdAt.toISOString();
+    summaryMap.set(round.mineCount, existing);
+  }
+
+  return Array.from(summaryMap.values())
+    .map((summary) => ({
+      ...summary,
+      winRate: summary.totalRounds === 0 ? 0 : summary.wins / summary.totalRounds,
+    }))
+    .sort((left, right) => left.mineCount - right.mineCount);
+}
+
+export async function getGlobalMineCountSummaries(): Promise<MineCountSummary[]> {
+  const rounds = await prisma.round.findMany({
     select: {
       mineCount: true,
       result: true,
@@ -283,6 +324,19 @@ export async function getRecentRounds(userId: string, mineCount?: number, limit 
     userId,
     ...(mineCount ? { mineCount } : {}),
   };
+  const rounds = await prisma.round.findMany({
+    where,
+    orderBy: {
+      createdAt: "desc",
+    },
+    take: limit,
+  });
+
+  return rounds.map(toRoundLog);
+}
+
+export async function getAdminRecentRounds(mineCount?: number, limit = 50): Promise<RoundLog[]> {
+  const where: Prisma.RoundWhereInput | undefined = mineCount ? { mineCount } : undefined;
   const rounds = await prisma.round.findMany({
     where,
     orderBy: {

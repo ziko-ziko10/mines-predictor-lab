@@ -35,10 +35,11 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
               <Link href="/logs">Logs</Link>
               <Link href="/analytics">Analytics</Link>
               <Link href="/evaluation">Evaluation</Link>
+              {auth.isAdmin ? <Link href="/admin/logs">Admin Logs</Link> : null}
             </nav>
             <div className="topbar-right">
               {!auth.configured ? <span className="status-pill">Add Supabase auth envs</span> : null}
-              {auth.configured && auth.user?.email ? <SessionControls email={auth.user.email} /> : null}
+              {auth.configured && auth.user?.email ? <SessionControls email={auth.user.email} isAdmin={auth.isAdmin} /> : null}
               {auth.configured && !auth.user ? <span className="status-pill">Password sign-in required</span> : null}
             </div>
           </header>
