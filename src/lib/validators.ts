@@ -112,5 +112,13 @@ export const roundSubmissionSchema = z
           message: "The hit cell must also be included in the mine locations.",
         });
       }
+
+      if (value.hitCell && !value.playedCells.includes(value.hitCell)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["hitCell"],
+          message: "The hit cell must be one of the played predicted cells.",
+        });
+      }
     }
   });

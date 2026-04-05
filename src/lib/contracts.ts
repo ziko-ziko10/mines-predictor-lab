@@ -1,6 +1,14 @@
 export type RoundResult = "WON" | "LOST";
 export type PredictionMode = "CONFIDENT" | "EXPLORATORY" | "ABSTAIN";
 
+export type EvaluationStatus = "INSUFFICIENT_COVERAGE" | "PROVISIONAL" | "WEAK_SIGNAL" | "SUPPORTED";
+
+export interface MetricDelta {
+  value: number;
+  lower: number;
+  upper: number;
+}
+
 export interface BenchmarkMetrics {
   label: string;
   averageSafeRate: number;
@@ -10,6 +18,14 @@ export interface BenchmarkMetrics {
   fullSurvivalRateLower: number;
   fullSurvivalRateUpper: number;
   averageMineHits: number;
+  brierScore: number | null;
+  precisionAtK: number;
+  precisionAtKLower: number;
+  precisionAtKUpper: number;
+  precisionK: number;
+  topCellSafeRate: number;
+  topCellSafeRateLower: number;
+  topCellSafeRateUpper: number;
 }
 
 export interface HoldoutEvaluation {
@@ -18,11 +34,19 @@ export interface HoldoutEvaluation {
   holdoutRounds: number;
   trainingRounds: number;
   reliable: boolean;
+  status: EvaluationStatus;
   minimumKnownRounds: number;
+  minimumTrainingRounds: number;
+  minimumTruthRounds: number;
   note: string;
+  provisionalReasons: string[];
   currentModel: BenchmarkMetrics;
   frequencyBaseline: BenchmarkMetrics;
   randomBaseline: BenchmarkMetrics;
+  safeRateLiftVsRandom: MetricDelta;
+  safeRateLiftVsFrequency: MetricDelta;
+  fullSurvivalLiftVsRandom: MetricDelta;
+  fullSurvivalLiftVsFrequency: MetricDelta;
 }
 
 export interface CellInsight {
@@ -39,6 +63,24 @@ export interface CellInsight {
   timesPredicted: number;
   timesPlayed: number;
   mineReports: number;
+  estimatedMineProbability: number;
+  estimatedSafeProbability: number;
+  uncertaintyWidth: number;
+  supportScore: number;
+  truthSupport: number;
+  playedSupport: number;
+  playedSafeRate: number;
+  playedMineRate: number;
+  truthOnlyMineProbability: number;
+  truthOnlySafeProbability: number;
+  recentMineProbability: number;
+  recentSafeProbability: number;
+  recentTruthMineProbability: number;
+  recentPlayedMineProbability: number;
+  driftScore: number;
+  heuristicRiskScore: number;
+  supportedMostlyByTruth: boolean;
+  supportTier: "WEAK" | "PLAYED" | "MIXED" | "TRUTH";
 }
 
 export interface PredictionResponse {
@@ -53,6 +95,12 @@ export interface PredictionResponse {
   minimumRoundsForSignal: number;
   truthKnownRounds: number;
   truthCoverage: number;
+  modelVersion: string;
+  deterministic: boolean;
+  averageTopSafeProbability: number;
+  averageTopUncertainty: number;
+  decisionReasons: string[];
+  evaluationStatus: EvaluationStatus;
   note: string;
   suggestedCells: number[];
   rankedCells: CellInsight[];
@@ -110,6 +158,12 @@ export interface AnalyticsSnapshot {
   minimumRoundsForSignal: number;
   truthKnownRounds: number;
   truthCoverage: number;
+  modelVersion: string;
+  deterministic: boolean;
+  averageTopSafeProbability: number;
+  averageTopUncertainty: number;
+  decisionReasons: string[];
+  evaluationStatus: EvaluationStatus;
   note: string;
   suggestedCells: number[];
   cells: CellInsight[];

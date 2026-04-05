@@ -13,6 +13,11 @@ function percent(value: number) {
   return `${Math.round(value * 100)}%`;
 }
 
+function signedPercent(value: number) {
+  const rounded = Math.round(value * 100);
+  return `${rounded > 0 ? "+" : ""}${rounded}%`;
+}
+
 function interval(lower: number, upper: number) {
   return `${percent(lower)} - ${percent(upper)}`;
 }
@@ -49,7 +54,7 @@ export default async function EvaluationPage({ searchParams }: EvaluationPagePro
             <p className="eyebrow">Reality Check</p>
             <h1>Evaluation</h1>
           </div>
-          <p>Backtest the predictor on the latest truth-known rounds and compare it against simpler baselines.</p>
+          <p>Walk the model forward through truth-known rounds and compare it against simpler baselines without using future information.</p>
         </div>
 
         <div className="hero-stat-grid compact-hero-stats">
@@ -64,8 +69,8 @@ export default async function EvaluationPage({ searchParams }: EvaluationPagePro
             <small>{evaluation.truthKnownRounds} rounds contain full board truth.</small>
           </article>
           <article className="hero-stat-card">
-            <span>Holdout window</span>
-            <strong>{evaluation.holdoutRounds}</strong>
+            <span>Evaluation status</span>
+            <strong>{evaluation.status}</strong>
             <small>{evaluation.note}</small>
           </article>
         </div>
@@ -94,6 +99,9 @@ export default async function EvaluationPage({ searchParams }: EvaluationPagePro
             <p>{percent(model.averageSafeRate)} safe-cell rate</p>
             <small>CI: {interval(model.averageSafeRateLower, model.averageSafeRateUpper)}</small>
             <small>Full survival: {percent(model.fullSurvivalRate)}</small>
+            <small>Precision@{model.precisionK}: {percent(model.precisionAtK)}</small>
+            <small>Top-cell safe: {percent(model.topCellSafeRate)}</small>
+            <small>Brier: {model.brierScore === null ? "-" : model.brierScore.toFixed(3)}</small>
             <small>Average mine hits: {model.averageMineHits.toFixed(2)}</small>
           </article>
         ))}
@@ -109,7 +117,7 @@ export default async function EvaluationPage({ searchParams }: EvaluationPagePro
             <article className="ranking-row">
               <div>
                 <strong>Current mode</strong>
-                <small>{analytics.predictionMode}</small>
+                <small>{analytics.predictionMode} | {analytics.deterministic ? "Deterministic" : "Variable"}</small>
               </div>
               <span className={analytics.predictionMode === "CONFIDENT" ? "badge success-badge" : "badge warning-badge"}>
                 Signal {percent(analytics.signalScore)}
@@ -118,14 +126,14 @@ export default async function EvaluationPage({ searchParams }: EvaluationPagePro
             <article className="ranking-row">
               <div>
                 <strong>Minimum sample gate</strong>
-                <small>{analytics.minimumRoundsForSignal} rounds required before strong confidence.</small>
+                <small>{analytics.minimumRoundsForSignal} rounds required before strong confidence is considered.</small>
               </div>
               <span className="badge">{analytics.totalRounds} logged</span>
             </article>
             <article className="ranking-row">
               <div>
                 <strong>Full-board truth</strong>
-                <small>The backtest can only judge rounds where mine locations were fully saved.</small>
+                <small>The walk-forward test only judges rounds where mine locations were fully saved.</small>
               </div>
               <span className="badge">{analytics.truthKnownRounds} rounds</span>
             </article>
@@ -141,10 +149,10 @@ export default async function EvaluationPage({ searchParams }: EvaluationPagePro
             <article className="ranking-row">
               <div>
                 <strong>Beat random</strong>
-                <small>Current model safe rate should stay above the random baseline.</small>
+                <small>For a durable signal, the model-minus-random safe-rate interval should stay above zero.</small>
               </div>
               <span className="badge">
-                {percent(evaluation.currentModel.averageSafeRate - evaluation.randomBaseline.averageSafeRate)} lift
+                {signedPercent(evaluation.safeRateLiftVsRandom.value)} lift
               </span>
             </article>
             <article className="ranking-row">
@@ -153,13 +161,13 @@ export default async function EvaluationPage({ searchParams }: EvaluationPagePro
                 <small>If it cannot beat a plain mine-frequency sort, the extra heuristic complexity is not helping.</small>
               </div>
               <span className="badge">
-                {percent(evaluation.currentModel.averageSafeRate - evaluation.frequencyBaseline.averageSafeRate)} lift
+                {signedPercent(evaluation.safeRateLiftVsFrequency.value)} lift
               </span>
             </article>
             <article className="ranking-row">
               <div>
-                <strong>Need more truth?</strong>
-                <small>{evaluation.note}</small>
+                <strong>Current caveat</strong>
+                <small>{evaluation.provisionalReasons[0] ?? evaluation.note}</small>
               </div>
               <span className="badge">{percent(evaluation.truthCoverage)} truth coverage</span>
             </article>

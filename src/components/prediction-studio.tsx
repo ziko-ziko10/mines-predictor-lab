@@ -15,6 +15,11 @@ function percent(value: number) {
   return `${Math.round(value * 100)}%`;
 }
 
+function signedPercent(value: number) {
+  const rounded = Math.round(value * 100);
+  return `${rounded > 0 ? "+" : ""}${rounded}%`;
+}
+
 function formatDate(value: string | null) {
   if (!value) {
     return "No rounds logged yet";
@@ -389,9 +394,11 @@ export function PredictionStudio({ summaries }: PredictionStudioProps) {
             <span className="badge">{prediction.totalWins} wins</span>
             <span className="badge">{prediction.totalLosses} losses</span>
             <span className="badge">{prediction.truthKnownRounds} full-board rounds</span>
+            <span className="badge">{prediction.deterministic ? "Deterministic" : "Variable"}</span>
             <span className={prediction.predictionMode === "CONFIDENT" ? "badge success-badge" : "badge warning-badge"}>
               {prediction.predictionMode}
             </span>
+            <span className="badge">Eval {prediction.evaluationStatus}</span>
           </div>
         ) : null}
 
@@ -399,8 +406,11 @@ export function PredictionStudio({ summaries }: PredictionStudioProps) {
         {prediction ? <p className="suggestion-line">Current suggested set: {prediction.suggestedCells.map(cellLabel).join(", ")}</p> : null}
         {prediction ? (
           <p className="muted-text">
-            Signal score {percent(prediction.signalScore)} | Truth coverage {percent(prediction.truthCoverage)} | Minimum rounds for signal {prediction.minimumRoundsForSignal}
+            Signal score {percent(prediction.signalScore)} | Avg top safe probability {percent(prediction.averageTopSafeProbability)} | Avg uncertainty {percent(prediction.averageTopUncertainty)} | Truth coverage {percent(prediction.truthCoverage)}
           </p>
+        ) : null}
+        {prediction?.decisionReasons.length ? (
+          <p className="muted-text">Decision check: {prediction.decisionReasons[0]}</p>
         ) : null}
       </section>
 
@@ -617,7 +627,7 @@ export function PredictionStudio({ summaries }: PredictionStudioProps) {
           <section className="card ranking-card">
             <div className="section-heading">
               <h2>Live cell ranking</h2>
-              <p>The lowest risk cells are at the top. This is calculated only from the selected mine count dataset.</p>
+              <p>The top cells are ranked by estimated safe probability, then uncertainty and support. This uses only the selected mine count dataset.</p>
             </div>
 
             <div className="ranking-list">
@@ -626,12 +636,14 @@ export function PredictionStudio({ summaries }: PredictionStudioProps) {
                   <div>
                     <strong>{cell.label}</strong>
                     <small>
-                      Risk {percent(cell.riskScore)} | Confidence {percent(cell.confidence)}
+                      Safe {percent(cell.estimatedSafeProbability)} | Uncertainty {percent(cell.uncertaintyWidth)} | Drift {signedPercent(cell.driftScore)}
                     </small>
                   </div>
                   <div className="ranking-metrics">
-                    <span className="badge">Mine reports {cell.mineReports}</span>
-                    <span className="badge">Played wins {percent(cell.playWinRate)}</span>
+                    <span className="badge">Truth {cell.truthSupport}</span>
+                    <span className="badge">Played {cell.playedSupport}</span>
+                    <span className="badge">Support {cell.supportTier}</span>
+                    <span className="badge">Played safe {percent(cell.playedSafeRate)}</span>
                   </div>
                 </article>
               ))}

@@ -14,6 +14,11 @@ function percent(value: number) {
   return `${Math.round(value * 100)}%`;
 }
 
+function signedPercent(value: number) {
+  const rounded = Math.round(value * 100);
+  return `${rounded > 0 ? "+" : ""}${rounded}%`;
+}
+
 function interval(lower: number, upper: number) {
   return `${percent(lower)} - ${percent(upper)}`;
 }
@@ -65,8 +70,8 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
           </article>
           <article className="hero-stat-card">
             <span>Model note</span>
-            <strong>{analytics.totalRounds}</strong>
-            <small>{analytics.note}</small>
+            <strong>{analytics.predictionMode}</strong>
+            <small>{analytics.decisionReasons[0] ?? analytics.note}</small>
           </article>
           <article className="hero-stat-card">
             <span>Truth coverage</span>
@@ -113,14 +118,14 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
         <article className="card stat-card">
           <strong>Current mode</strong>
           <p>{analytics.predictionMode}</p>
-          <small>{analytics.abstainReason ?? "The current suggestion set clears the app's minimum sample gate."}</small>
+          <small>{analytics.abstainReason ?? analytics.decisionReasons[0] ?? "The current suggestion set clears the model gate."}</small>
         </article>
       </section>
 
       <section className="card analytics-layout">
         <div className="section-heading">
           <h2>Risk heatmap</h2>
-          <p>Lower risk means the cell has fewer mine reports and better play results for this mine count.</p>
+          <p>Cells now show estimated safe probability with uncertainty-aware opacity rather than only a handcrafted risk blend.</p>
         </div>
 
         <div className="heatmap-grid">
@@ -129,12 +134,12 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
               key={cell.cellIndex}
               className="heatmap-cell"
               style={{
-                opacity: Math.max(0.35, 1 - cell.riskScore * 0.55),
+                opacity: Math.max(0.35, cell.estimatedSafeProbability),
               }}
             >
               <strong>{cellLabel(cell.cellIndex)}</strong>
-              <small>Risk {percent(cell.riskScore)}</small>
-              <small>Confidence {percent(cell.confidence)}</small>
+              <small>Safe {percent(cell.estimatedSafeProbability)}</small>
+              <small>Uncertainty {percent(cell.uncertaintyWidth)}</small>
             </article>
           ))}
         </div>
@@ -152,10 +157,10 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
               <article key={cell.cellIndex} className="ranking-row">
                 <div>
                   <strong>{cell.label}</strong>
-                  <small>Risk {percent(cell.riskScore)}</small>
+                  <small>Safe {percent(cell.estimatedSafeProbability)} | Uncertainty {percent(cell.uncertaintyWidth)}</small>
                   <small>Mine-rate band {interval(cell.mineRateLowerBound, cell.mineRateUpperBound)}</small>
                 </div>
-                <span className="badge">Mine reports {cell.mineReports}</span>
+                <span className="badge">{cell.supportTier} support</span>
               </article>
             ))}
           </div>
@@ -172,10 +177,10 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
               <article key={cell.cellIndex} className="ranking-row">
                 <div>
                   <strong>{cell.label}</strong>
-                  <small>Risk {percent(cell.riskScore)}</small>
+                  <small>Safe {percent(cell.estimatedSafeProbability)} | Drift {signedPercent(cell.driftScore)}</small>
                   <small>Mine-rate band {interval(cell.mineRateLowerBound, cell.mineRateUpperBound)}</small>
                 </div>
-                <span className="badge">Mine reports {cell.mineReports}</span>
+                <span className="badge">Played safe {percent(cell.playedSafeRate)}</span>
               </article>
             ))}
           </div>
@@ -198,9 +203,14 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
 
         <div className="summary-grid">
           <article className="card stat-card">
-            <strong>Holdout rounds</strong>
+            <strong>Walk-forward status</strong>
+            <p>{analytics.evaluation.status}</p>
+            <small>{analytics.evaluation.note}</small>
+          </article>
+          <article className="card stat-card">
+            <strong>Walk-forward rounds</strong>
             <p>{analytics.evaluation.holdoutRounds}</p>
-            <small>{analytics.evaluation.reliable ? "Enough holdout data for a first pass." : "Still too small for strong trust."}</small>
+            <small>{analytics.evaluation.reliable ? "Enough data to judge the model, even if the conclusion is negative." : "Coverage is still too thin for strong trust."}</small>
           </article>
           <article className="card stat-card">
             <strong>Current model safe rate</strong>
@@ -208,9 +218,9 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
             <small>{interval(analytics.evaluation.currentModel.averageSafeRateLower, analytics.evaluation.currentModel.averageSafeRateUpper)}</small>
           </article>
           <article className="card stat-card">
-            <strong>Random baseline</strong>
-            <p>{percent(analytics.evaluation.randomBaseline.averageSafeRate)}</p>
-            <small>Expected safe-cell rate for random picks.</small>
+            <strong>Lift vs frequency</strong>
+            <p>{signedPercent(analytics.evaluation.safeRateLiftVsFrequency.value)}</p>
+            <small>{interval(analytics.evaluation.safeRateLiftVsFrequency.lower, analytics.evaluation.safeRateLiftVsFrequency.upper)}</small>
           </article>
         </div>
       </section>

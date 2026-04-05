@@ -5,30 +5,42 @@ import { normalizeCells, parseCells, serializeCells } from "@/lib/board";
 import type {
   AnalyticsSnapshot,
   MineCountSummary,
+  PredictionMode,
   PredictionResponse,
   RoundLog,
+  RoundResult,
   RoundSubmission,
 } from "@/lib/contracts";
 import { buildHoldoutEvaluation } from "@/lib/evaluation";
-import { buildCellInsights, buildPredictionDecision, buildPredictorNote, pickSuggestedCells } from "@/lib/predictor";
+import {
+  MODEL_VERSION,
+  buildCellInsights,
+  buildPredictionDecision,
+  buildPredictorNote,
+  countTruthKnownRounds,
+  pickSuggestedCells,
+} from "@/lib/predictor";
+import { deriveStatsFromHistoryRounds, normalizeHistoryRound, type ModelHistoryRound, type RawCellStat } from "@/lib/round-stats";
 import { roundSubmissionSchema } from "@/lib/validators";
 
-function toRoundLog(round: {
+type RoundRow = {
   id: string;
   userId: string;
   mineCount: number;
   predictionCount: number;
-  predictionMode: "CONFIDENT" | "EXPLORATORY" | "ABSTAIN";
+  predictionMode: PredictionMode;
   predictedCells: string;
   playedCells: string | null;
-  result: "WON" | "LOST";
+  result: RoundResult;
   hitCell: number | null;
   mineLocations: string | null;
   serverSeed: string | null;
   clientSeed: string | null;
   nonce: string | null;
   createdAt: Date;
-}): RoundLog {
+};
+
+function toRoundLog(round: RoundRow): RoundLog {
   return {
     id: round.id,
     userId: round.userId,
@@ -44,6 +56,141 @@ function toRoundLog(round: {
     clientSeed: round.clientSeed,
     nonce: round.nonce,
     createdAt: round.createdAt.toISOString(),
+  };
+}
+
+function toModelHistoryRound(round: Pick<RoundRow, "predictionCount" | "predictedCells" | "playedCells" | "result" | "hitCell" | "mineLocations">) {
+  return normalizeHistoryRound({
+    predictionCount: round.predictionCount,
+    predictedCells: parseCells(round.predictedCells),
+    playedCells: parseCells(round.playedCells),
+    result: round.result,
+    hitCell: round.hitCell,
+    mineLocations: parseCells(round.mineLocations),
+  });
+}
+
+function sameStats(left: RawCellStat[], right: RawCellStat[]) {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  for (let index = 0; index < left.length; index += 1) {
+    const leftEntry = left[index];
+    const rightEntry = right[index];
+
+    if (
+      !rightEntry ||
+      leftEntry.cellIndex !== rightEntry.cellIndex ||
+      leftEntry.timesPredicted !== rightEntry.timesPredicted ||
+      leftEntry.timesPlayed !== rightEntry.timesPlayed ||
+      leftEntry.mineReports !== rightEntry.mineReports ||
+      leftEntry.winCount !== rightEntry.winCount ||
+      leftEntry.lossCount !== rightEntry.lossCount
+    ) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+async function syncCellStatCache(
+  client: Prisma.TransactionClient | typeof prisma,
+  userId: string,
+  mineCount: number,
+  rounds: ModelHistoryRound[],
+) {
+  const derivedStats = deriveStatsFromHistoryRounds(rounds, mineCount);
+  const cachedStats = await client.cellStat.findMany({
+    where: { userId, mineCount },
+    orderBy: { cellIndex: "asc" },
+  });
+
+  if (sameStats(cachedStats, derivedStats)) {
+    return derivedStats;
+  }
+
+  await client.cellStat.deleteMany({
+    where: { userId, mineCount },
+  });
+
+  if (derivedStats.length > 0) {
+    await client.cellStat.createMany({
+      data: derivedStats.map((stat) => ({
+        userId,
+        mineCount,
+        cellIndex: stat.cellIndex,
+        timesPredicted: stat.timesPredicted,
+        timesPlayed: stat.timesPlayed,
+        mineReports: stat.mineReports,
+        winCount: stat.winCount,
+        lossCount: stat.lossCount,
+      })),
+    });
+  }
+
+  return derivedStats;
+}
+
+function buildPredictionNote(
+  totalRounds: number,
+  totalLosses: number,
+  predictionMode: PredictionMode,
+  reasons: string[],
+  evaluationNote: string,
+) {
+  const modeNote =
+    predictionMode === "CONFIDENT"
+      ? "The live set is deterministic and currently clears the walk-forward confidence gate."
+      : predictionMode === "ABSTAIN"
+        ? "The model is abstaining from a trust claim; any cells shown below should be treated as exploratory only."
+        : "The model is still in exploratory mode because the evidence is not strong enough for a confident claim.";
+
+  return [buildPredictorNote(totalRounds, totalLosses), modeNote, reasons[0], evaluationNote].filter(Boolean).join(" ");
+}
+
+function buildPredictionArtifacts(mineCount: number, predictionCount: number, roundRows: RoundRow[]) {
+  const modelRounds = roundRows.map(toModelHistoryRound);
+  const totalRounds = modelRounds.length;
+  const totalWins = modelRounds.filter((round) => round.result === "WON").length;
+  const totalLosses = totalRounds - totalWins;
+  const truthKnownRounds = countTruthKnownRounds(modelRounds, mineCount);
+  const rankedCells = buildCellInsights({
+    mineCount,
+    rounds: modelRounds,
+  });
+  const evaluation = buildHoldoutEvaluation(
+    mineCount,
+    roundRows.map((row) => ({
+      id: row.id,
+      createdAt: row.createdAt,
+      ...toModelHistoryRound(row),
+    })),
+  );
+  const decision = buildPredictionDecision({
+    mineCount,
+    insights: rankedCells,
+    predictionCount,
+    totalRounds,
+    truthKnownRounds,
+    evaluation,
+  });
+  const recentPredictions = modelRounds.slice(Math.max(0, modelRounds.length - 8)).reverse().map((round) => round.predictedCells);
+  const suggestedCells = pickSuggestedCells(rankedCells, predictionCount, recentPredictions, decision.predictionMode);
+  const note = buildPredictionNote(totalRounds, totalLosses, decision.predictionMode, decision.reasons, evaluation.note);
+
+  return {
+    modelRounds,
+    totalRounds,
+    totalWins,
+    totalLosses,
+    truthKnownRounds,
+    rankedCells,
+    evaluation,
+    decision,
+    suggestedCells,
+    note,
   };
 }
 
@@ -129,60 +276,40 @@ export async function getGlobalMineCountSummaries(): Promise<MineCountSummary[]>
 }
 
 export async function getPrediction(userId: string, mineCount: number, predictionCount: number): Promise<PredictionResponse> {
-  const [rounds, stats, recentPredictionRows] = await prisma.$transaction([
-    prisma.round.findMany({
+  return prisma.$transaction(async (transaction) => {
+    const roundRows = (await transaction.round.findMany({
       where: { userId, mineCount },
-      select: { result: true, mineLocations: true },
-    }),
-    prisma.cellStat.findMany({
-      where: { userId, mineCount },
-      orderBy: { cellIndex: "asc" },
-    }),
-    prisma.round.findMany({
-      where: { userId, mineCount },
-      select: { predictedCells: true },
-      orderBy: { createdAt: "desc" },
-      take: 8,
-    }),
-  ]);
+      orderBy: { createdAt: "asc" },
+    })) as RoundRow[];
+    const modelRounds = roundRows.map(toModelHistoryRound);
 
-  const totalRounds = rounds.length;
-  const totalWins = rounds.filter((round) => round.result === "WON").length;
-  const totalLosses = totalRounds - totalWins;
-  const truthKnownRounds = rounds.filter((round) => Boolean(round.mineLocations)).length;
-  const rankedCells = buildCellInsights({
-    mineCount,
-    totalRounds,
-    totalLosses,
-    truthKnownRounds,
-    stats,
+    await syncCellStatCache(transaction, userId, mineCount, modelRounds);
+
+    const artifacts = buildPredictionArtifacts(mineCount, predictionCount, roundRows);
+
+    return {
+      mineCount,
+      predictionCount,
+      totalRounds: artifacts.totalRounds,
+      totalWins: artifacts.totalWins,
+      totalLosses: artifacts.totalLosses,
+      predictionMode: artifacts.decision.predictionMode,
+      abstainReason: artifacts.decision.abstainReason,
+      signalScore: artifacts.decision.signalScore,
+      minimumRoundsForSignal: artifacts.decision.minimumRoundsForSignal,
+      truthKnownRounds: artifacts.truthKnownRounds,
+      truthCoverage: artifacts.totalRounds === 0 ? 0 : artifacts.truthKnownRounds / artifacts.totalRounds,
+      modelVersion: MODEL_VERSION,
+      deterministic: artifacts.decision.deterministic,
+      averageTopSafeProbability: artifacts.decision.averageTopSafeProbability,
+      averageTopUncertainty: artifacts.decision.averageTopCellUncertainty,
+      decisionReasons: artifacts.decision.reasons,
+      evaluationStatus: artifacts.evaluation.status,
+      note: artifacts.note,
+      suggestedCells: artifacts.suggestedCells,
+      rankedCells: artifacts.rankedCells,
+    };
   });
-  const recentPredictions = recentPredictionRows.map((row) => parseCells(row.predictedCells));
-  const decision = buildPredictionDecision(rankedCells, predictionCount, totalRounds, truthKnownRounds);
-  const suggestedCells = pickSuggestedCells(rankedCells, predictionCount, recentPredictions);
-  const modeNote =
-    decision.predictionMode === "CONFIDENT"
-      ? "Signal quality is currently above the app's minimum confidence gate."
-      : decision.predictionMode === "EXPLORATORY"
-        ? decision.abstainReason ?? "Signal quality is still exploratory for this mine count."
-        : `${decision.abstainReason ?? "The model abstained."} The cells below are exploratory only.`;
-
-  return {
-    mineCount,
-    predictionCount,
-    totalRounds,
-    totalWins,
-    totalLosses,
-    predictionMode: decision.predictionMode,
-    abstainReason: decision.abstainReason,
-    signalScore: decision.signalScore,
-    minimumRoundsForSignal: decision.minimumRoundsForSignal,
-    truthKnownRounds,
-    truthCoverage: totalRounds === 0 ? 0 : truthKnownRounds / totalRounds,
-    note: `${buildPredictorNote(totalRounds, totalLosses)} ${modeNote}`,
-    suggestedCells,
-    rankedCells,
-  };
 }
 
 export async function logRound(userId: string, input: RoundSubmission) {
@@ -196,8 +323,8 @@ export async function logRound(userId: string, input: RoundSubmission) {
     mineCount: number;
     predictionCount: number;
     predictedCells: number[];
-    predictionMode: "CONFIDENT" | "EXPLORATORY" | "ABSTAIN";
-    result: "WON" | "LOST";
+    predictionMode: PredictionMode;
+    result: RoundResult;
     playedCells: number[];
     hitCell: number | null;
     mineLocations: number[];
@@ -223,95 +350,12 @@ export async function logRound(userId: string, input: RoundSubmission) {
         nonce: parsed.nonce || null,
       },
     });
+    const roundRows = (await transaction.round.findMany({
+      where: { userId, mineCount: parsed.mineCount },
+      orderBy: { createdAt: "asc" },
+    })) as RoundRow[];
 
-    const deltas = new Map<
-      number,
-      {
-        timesPredicted: number;
-        timesPlayed: number;
-        mineReports: number;
-        winCount: number;
-        lossCount: number;
-      }
-    >();
-
-    function bump(
-      cellIndex: number,
-      update: Partial<{
-        timesPredicted: number;
-        timesPlayed: number;
-        mineReports: number;
-        winCount: number;
-        lossCount: number;
-      }>,
-    ) {
-      const existing = deltas.get(cellIndex) ?? {
-        timesPredicted: 0,
-        timesPlayed: 0,
-        mineReports: 0,
-        winCount: 0,
-        lossCount: 0,
-      };
-
-      deltas.set(cellIndex, {
-        timesPredicted: existing.timesPredicted + (update.timesPredicted ?? 0),
-        timesPlayed: existing.timesPlayed + (update.timesPlayed ?? 0),
-        mineReports: existing.mineReports + (update.mineReports ?? 0),
-        winCount: existing.winCount + (update.winCount ?? 0),
-        lossCount: existing.lossCount + (update.lossCount ?? 0),
-      });
-    }
-
-    for (const cell of parsed.predictedCells) {
-      bump(cell, { timesPredicted: 1 });
-    }
-
-    for (const cell of parsed.playedCells) {
-      bump(cell, { timesPlayed: 1, winCount: parsed.result === "WON" ? 1 : 0 });
-    }
-
-    for (const cell of parsed.mineLocations) {
-      bump(cell, { mineReports: 1 });
-    }
-
-    if (parsed.result === "LOST" && parsed.hitCell) {
-      bump(parsed.hitCell, { lossCount: 1, timesPlayed: 1 });
-    }
-
-    for (const [cellIndex, delta] of deltas.entries()) {
-      await transaction.cellStat.upsert({
-        where: {
-          userId_mineCount_cellIndex: {
-            userId,
-            mineCount: parsed.mineCount,
-            cellIndex,
-          },
-        },
-        create: {
-          userId,
-          mineCount: parsed.mineCount,
-          cellIndex,
-          ...delta,
-        },
-        update: {
-          timesPredicted: {
-            increment: delta.timesPredicted,
-          },
-          timesPlayed: {
-            increment: delta.timesPlayed,
-          },
-          mineReports: {
-            increment: delta.mineReports,
-          },
-          winCount: {
-            increment: delta.winCount,
-          },
-          lossCount: {
-            increment: delta.lossCount,
-          },
-        },
-      });
-    }
+    await syncCellStatCache(transaction, userId, parsed.mineCount, roundRows.map(toModelHistoryRound));
 
     return {
       id: round.id,
@@ -324,102 +368,78 @@ export async function getRecentRounds(userId: string, mineCount?: number, limit 
     userId,
     ...(mineCount ? { mineCount } : {}),
   };
-  const rounds = await prisma.round.findMany({
+  const rounds = (await prisma.round.findMany({
     where,
     orderBy: {
       createdAt: "desc",
     },
     take: limit,
-  });
+  })) as RoundRow[];
 
   return rounds.map(toRoundLog);
 }
 
 export async function getAdminRecentRounds(mineCount?: number, limit = 50): Promise<RoundLog[]> {
   const where: Prisma.RoundWhereInput | undefined = mineCount ? { mineCount } : undefined;
-  const rounds = await prisma.round.findMany({
+  const rounds = (await prisma.round.findMany({
     where,
     orderBy: {
       createdAt: "desc",
     },
     take: limit,
-  });
+  })) as RoundRow[];
 
   return rounds.map(toRoundLog);
 }
 
 export async function getAnalytics(userId: string, mineCount: number): Promise<AnalyticsSnapshot> {
-  const [recentRoundRows, allRoundRows, cellStats] = await prisma.$transaction([
-    prisma.round.findMany({
-      where: { userId, mineCount },
-      orderBy: { createdAt: "desc" },
-      take: 20,
-    }),
-    prisma.round.findMany({
-      where: { userId, mineCount },
-      orderBy: { createdAt: "desc" },
-    }),
-    prisma.cellStat.findMany({
-      where: { userId, mineCount },
-      orderBy: { cellIndex: "asc" },
-    }),
-  ]);
+  return prisma.$transaction(async (transaction) => {
+    const [recentRoundRows, allRoundRows] = await Promise.all([
+      transaction.round.findMany({
+        where: { userId, mineCount },
+        orderBy: { createdAt: "desc" },
+        take: 20,
+      }),
+      transaction.round.findMany({
+        where: { userId, mineCount },
+        orderBy: { createdAt: "asc" },
+      }),
+    ]);
+    const recentRounds = (recentRoundRows as RoundRow[]).map(toRoundLog);
+    const roundRows = allRoundRows as RoundRow[];
+    const modelRounds = roundRows.map(toModelHistoryRound);
 
-  const recentRounds = recentRoundRows.map(toRoundLog);
-  const totalRounds = allRoundRows.length;
-  const wins = allRoundRows.filter((round) => round.result === "WON").length;
-  const losses = totalRounds - wins;
-  const truthKnownRounds = allRoundRows.filter((round) => Boolean(round.mineLocations)).length;
-  const averagePredictionCount =
-    totalRounds === 0
-      ? 0
-      : allRoundRows.reduce((sum, round) => sum + round.predictionCount, 0) / totalRounds;
-  const cells = buildCellInsights({
-    mineCount,
-    totalRounds,
-    totalLosses: losses,
-    truthKnownRounds,
-    stats: cellStats,
+    await syncCellStatCache(transaction, userId, mineCount, modelRounds);
+
+    const averagePredictionCount =
+      roundRows.length === 0 ? 0 : roundRows.reduce((sum, round) => sum + round.predictionCount, 0) / roundRows.length;
+    const artifacts = buildPredictionArtifacts(mineCount, Math.min(5, 25 - mineCount), roundRows);
+
+    return {
+      mineCount,
+      totalRounds: artifacts.totalRounds,
+      wins: artifacts.totalWins,
+      losses: artifacts.totalLosses,
+      averagePredictionCount,
+      predictionMode: artifacts.decision.predictionMode,
+      abstainReason: artifacts.decision.abstainReason,
+      signalScore: artifacts.decision.signalScore,
+      minimumRoundsForSignal: artifacts.decision.minimumRoundsForSignal,
+      truthKnownRounds: artifacts.truthKnownRounds,
+      truthCoverage: artifacts.totalRounds === 0 ? 0 : artifacts.truthKnownRounds / artifacts.totalRounds,
+      modelVersion: MODEL_VERSION,
+      deterministic: artifacts.decision.deterministic,
+      averageTopSafeProbability: artifacts.decision.averageTopSafeProbability,
+      averageTopUncertainty: artifacts.decision.averageTopCellUncertainty,
+      decisionReasons: artifacts.decision.reasons,
+      evaluationStatus: artifacts.evaluation.status,
+      note: artifacts.note,
+      suggestedCells: artifacts.suggestedCells,
+      cells: artifacts.rankedCells,
+      safestCells: artifacts.rankedCells.slice().sort((left, right) => left.riskScore - right.riskScore).slice(0, 5),
+      riskiestCells: artifacts.rankedCells.slice().sort((left, right) => right.riskScore - left.riskScore).slice(0, 5),
+      recentRounds,
+      evaluation: artifacts.evaluation,
+    };
   });
-  const decision = buildPredictionDecision(cells, Math.min(5, 25 - mineCount), totalRounds, truthKnownRounds);
-  const recentPredictions = allRoundRows.slice(0, 8).map((row) => parseCells(row.predictedCells));
-  const suggestedCells = pickSuggestedCells(cells, Math.min(5, 25 - mineCount), recentPredictions);
-  const evaluation = buildHoldoutEvaluation(
-    mineCount,
-    allRoundRows.map((row) => ({
-      id: row.id,
-      predictionCount: row.predictionCount,
-      predictedCells: parseCells(row.predictedCells),
-      playedCells: parseCells(row.playedCells),
-      result: row.result,
-      hitCell: row.hitCell,
-      mineLocations: parseCells(row.mineLocations),
-      createdAt: row.createdAt,
-    })),
-  );
-  const modeNote =
-    decision.predictionMode === "CONFIDENT"
-      ? "The current suggestion set clears the minimum confidence gate for this dataset."
-      : decision.abstainReason ?? "The current suggestion set is still exploratory.";
-
-  return {
-    mineCount,
-    totalRounds,
-    wins,
-    losses,
-    averagePredictionCount,
-    predictionMode: decision.predictionMode,
-    abstainReason: decision.abstainReason,
-    signalScore: decision.signalScore,
-    minimumRoundsForSignal: decision.minimumRoundsForSignal,
-    truthKnownRounds,
-    truthCoverage: totalRounds === 0 ? 0 : truthKnownRounds / totalRounds,
-    note: `${buildPredictorNote(totalRounds, losses)} ${modeNote}`,
-    suggestedCells,
-    cells,
-    safestCells: cells.slice().sort((left, right) => left.riskScore - right.riskScore).slice(0, 5),
-    riskiestCells: cells.slice().sort((left, right) => right.riskScore - left.riskScore).slice(0, 5),
-    recentRounds,
-    evaluation,
-  };
 }
